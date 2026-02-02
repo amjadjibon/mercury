@@ -54,18 +54,26 @@ impl FeedParser for BinanceParser {
 
 impl BinanceParser {
     fn parse_depth_update(&self, msg: BinanceDepthUpdate) -> FeedMessage {
-        let symbol = Symbol::new(&msg.s);
+        let symbol = Symbol::new(&msg.symbol);
 
-        let bids: Vec<Level> = msg.b.iter().filter_map(|l| self.parse_level(l)).collect();
+        let bids: Vec<Level> = msg
+            .bids
+            .iter()
+            .filter_map(|l| self.parse_level(l))
+            .collect();
 
-        let asks: Vec<Level> = msg.a.iter().filter_map(|l| self.parse_level(l)).collect();
+        let asks: Vec<Level> = msg
+            .asks
+            .iter()
+            .filter_map(|l| self.parse_level(l))
+            .collect();
 
         let update = BookUpdate {
             exchange: Exchange::Binance,
             symbol,
             bids,
             asks,
-            sequence: msg.u,
+            sequence: msg.final_update_id,
             is_snapshot: false,
         };
 
@@ -75,12 +83,16 @@ impl BinanceParser {
     fn parse_trade(&self, msg: BinanceTrade) -> FeedMessage {
         let trade = Trade {
             exchange: Exchange::Binance,
-            symbol: Symbol::new(&msg.s),
-            price: Decimal::from_str(&msg.p).unwrap_or_default(),
-            quantity: Decimal::from_str(&msg.q).unwrap_or_default(),
-            side: if msg.m { Side::Sell } else { Side::Buy },
-            trade_id: msg.t,
-            timestamp: msg.T * 1_000_000, // Convert ms to ns
+            symbol: Symbol::new(&msg.symbol),
+            price: Decimal::from_str(&msg.price).unwrap_or_default(),
+            quantity: Decimal::from_str(&msg.quantity).unwrap_or_default(),
+            side: if msg.is_buyer_maker {
+                Side::Sell
+            } else {
+                Side::Buy
+            },
+            trade_id: msg.trade_id,
+            timestamp: msg.trade_time * 1_000_000, // Convert ms to ns
         };
 
         FeedMessage::Trade(trade)
@@ -97,45 +109,60 @@ impl BinanceParser {
 #[derive(Debug, Deserialize)]
 struct BinanceDepthUpdate {
     /// Event type
+    #[serde(rename = "e")]
     #[allow(dead_code)]
-    e: String,
+    event_type: String,
     /// Event time
+    #[serde(rename = "E")]
     #[allow(dead_code)]
-    E: u64,
+    event_time: u64,
     /// Symbol
-    s: String,
+    #[serde(rename = "s")]
+    symbol: String,
     /// First update ID
+    #[serde(rename = "U")]
     #[allow(dead_code)]
-    U: u64,
+    first_update_id: u64,
     /// Final update ID
-    u: u64,
+    #[serde(rename = "u")]
+    final_update_id: u64,
     /// Bids
-    b: Vec<[String; 2]>,
+    #[serde(rename = "b")]
+    bids: Vec<[String; 2]>,
     /// Asks
-    a: Vec<[String; 2]>,
+    #[serde(rename = "a")]
+    asks: Vec<[String; 2]>,
 }
 
 /// Binance trade message.
 #[derive(Debug, Deserialize)]
 struct BinanceTrade {
     /// Event type
+    #[serde(rename = "e")]
     #[allow(dead_code)]
-    e: String,
+    event_type: String,
     /// Event time
+    #[serde(rename = "E")]
     #[allow(dead_code)]
-    E: u64,
+    event_time: u64,
     /// Symbol
-    s: String,
+    #[serde(rename = "s")]
+    symbol: String,
     /// Trade ID
-    t: u64,
+    #[serde(rename = "t")]
+    trade_id: u64,
     /// Price
-    p: String,
+    #[serde(rename = "p")]
+    price: String,
     /// Quantity
-    q: String,
+    #[serde(rename = "q")]
+    quantity: String,
     /// Trade time
-    T: i64,
+    #[serde(rename = "T")]
+    trade_time: i64,
     /// Is buyer market maker
-    m: bool,
+    #[serde(rename = "m")]
+    is_buyer_maker: bool,
 }
 
 #[cfg(test)]

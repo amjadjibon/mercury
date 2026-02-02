@@ -3,7 +3,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use mercury_core::EventBus;
-use mercury_gateway::{BinanceConfig, BinanceGateway};
+use mercury_gateway::{BinanceConfig, BinanceGateway, ExchangeGateway};
 use mercury_market::{BinanceParser, FeedManager};
 use mercury_risk::{RiskConfig, RiskManager};
 use mercury_strategy::{MarketMaker, StrategyRunner};
@@ -124,6 +124,14 @@ async fn run_trading(
 
     // Create risk manager
     let risk_manager = Arc::new(RiskManager::new(RiskConfig::default()));
+    info!(
+        default_max_position = %risk_manager.config().default_max_position,
+        daily_loss_limit = %risk_manager.config().daily_loss_limit,
+        "Risk manager initialized"
+    );
+
+    // Store risk manager for later use
+    let _risk_manager = risk_manager;
 
     // Create gateway
     let gateway_config = BinanceConfig {
@@ -131,7 +139,14 @@ async fn run_trading(
         secret_key: secret_key.unwrap_or_default(),
         testnet: paper,
     };
-    let gateway = Arc::new(BinanceGateway::new(gateway_config));
+    let mut gateway = BinanceGateway::new(gateway_config);
+
+    // Connect to gateway
+    if let Err(e) = gateway.connect().await {
+        info!(error = %e, "Failed to connect to gateway (continuing in offline mode)");
+    } else {
+        info!(exchange = "Binance", testnet = paper, "Gateway connected");
+    }
 
     // Create strategy runner
     let mut strategy_runner = StrategyRunner::new(Arc::clone(&event_bus));
@@ -167,6 +182,8 @@ async fn run_trading(
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
 
+    // Disconnect gateway
+    let _ = gateway.disconnect().await;
     feed_manager.shutdown().await;
 
     Ok(())
@@ -186,7 +203,31 @@ async fn run_replay(file: PathBuf, speed: f64) -> Result<()> {
 async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     info!(file = %file.display(), strategy = %strategy_name, "Starting backtest");
 
-    // TODO: Implement backtesting
-    info!("Backtest complete");
+    // Create event bus and strategy runner
+    let event_bus = Arc::new(EventBus::new(100_000));
+    let mut strategy_runner = StrategyRunner::new(Arc::clone(&event_bus));
+
+    match strategy_name.as_str() {
+        "market_maker" => {
+            let mm = MarketMaker::new(10, dec!(0.01), dec!(1.0));
+            strategy_runner.add_strategy(Box::new(mm));
+        }
+        "momentum" => {
+            let mom = mercury_strategy::Momentum::new(20, dec!(0.3), dec!(0.01));
+            strategy_runner.add_strategy(Box::new(mom));
+        }
+        _ => {
+            anyhow::bail!("Unknown strategy: {}", strategy_name);
+        }
+    }
+
+    // Replay data
+    let player = mercury_replay::Player::new(file, 0.0);
+    let count = player.play(Arc::clone(&event_bus)).await?;
+
+    // Run strategy
+    strategy_runner.run();
+
+    info!(events = count, "Backtest complete");
     Ok(())
 }

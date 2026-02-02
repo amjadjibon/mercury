@@ -1,7 +1,15 @@
 //! Event recorder to Parquet files.
 
-use mercury_core::Event;
+use arrow::array::{ArrayRef, Int64Array, StringArray, UInt64Array};
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
+use mercury_core::{Event, EventPayload};
+use parquet::arrow::ArrowWriter;
+use parquet::basic::Compression;
+use parquet::file::properties::WriterProperties;
+use std::fs::File;
 use std::path::PathBuf;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
 
@@ -11,7 +19,9 @@ pub enum RecorderError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Parquet error: {0}")]
-    Parquet(String),
+    Parquet(#[from] parquet::errors::ParquetError),
+    #[error("Arrow error: {0}")]
+    Arrow(#[from] arrow::error::ArrowError),
 }
 
 /// Records events to Parquet files.
@@ -19,16 +29,38 @@ pub struct Recorder {
     path: PathBuf,
     events: Vec<Event>,
     batch_size: usize,
+    writer: Option<ArrowWriter<File>>,
 }
 
 impl Recorder {
     /// Create a new recorder.
-    pub fn new(path: PathBuf, batch_size: usize) -> Self {
-        Self {
+    pub fn new(path: PathBuf, batch_size: usize) -> Result<Self, RecorderError> {
+        let schema = Self::event_schema();
+        let file = File::create(&path)?;
+
+        let props = WriterProperties::builder()
+            .set_compression(Compression::SNAPPY)
+            .build();
+
+        let writer = ArrowWriter::try_new(file, Arc::new(schema), Some(props))?;
+
+        Ok(Self {
             path,
             events: Vec::with_capacity(batch_size),
             batch_size,
-        }
+            writer: Some(writer),
+        })
+    }
+
+    /// Get the Arrow schema for events.
+    fn event_schema() -> Schema {
+        Schema::new(vec![
+            Field::new("id", DataType::UInt64, false),
+            Field::new("timestamp", DataType::Int64, false),
+            Field::new("event_type", DataType::Utf8, false),
+            Field::new("symbol", DataType::Utf8, true),
+            Field::new("payload_json", DataType::Utf8, false),
+        ])
     }
 
     /// Record an event.
@@ -48,12 +80,33 @@ impl Recorder {
             return Ok(());
         }
 
-        info!(count = self.events.len(), path = %self.path.display(), "Flushing events");
+        let count = self.events.len();
+        info!(count = count, path = %self.path.display(), "Flushing events");
 
-        // TODO: Implement Parquet writing
-        // For now, just clear the buffer
+        // Build arrays
+        let ids: Vec<u64> = self.events.iter().map(|e| e.id).collect();
+        let timestamps: Vec<i64> = self.events.iter().map(|e| e.timestamp).collect();
+        let event_types: Vec<String> = self.events.iter().map(|e| e.event_type()).collect();
+        let symbols: Vec<Option<String>> = self.events.iter().map(|e| e.symbol()).collect();
+        let payloads: Vec<String> = self.events.iter().map(|e| e.payload_json()).collect();
+
+        let id_array = Arc::new(UInt64Array::from(ids)) as ArrayRef;
+        let ts_array = Arc::new(Int64Array::from(timestamps)) as ArrayRef;
+        let type_array = Arc::new(StringArray::from(event_types)) as ArrayRef;
+        let symbol_array = Arc::new(StringArray::from(symbols)) as ArrayRef;
+        let payload_array = Arc::new(StringArray::from(payloads)) as ArrayRef;
+
+        let schema = Arc::new(Self::event_schema());
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![id_array, ts_array, type_array, symbol_array, payload_array],
+        )?;
+
+        if let Some(ref mut writer) = self.writer {
+            writer.write(&batch)?;
+        }
+
         self.events.clear();
-
         Ok(())
     }
 
@@ -61,10 +114,129 @@ impl Recorder {
     pub fn buffered(&self) -> usize {
         self.events.len()
     }
+
+    /// Close the recorder and finalize the file.
+    pub fn close(mut self) -> Result<(), RecorderError> {
+        self.flush()?;
+        if let Some(writer) = self.writer.take() {
+            writer.close()?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for Recorder {
     fn drop(&mut self) {
         let _ = self.flush();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.close();
+        }
+    }
+}
+
+/// Helper trait for Event to extract metadata.
+trait EventExt {
+    fn event_type(&self) -> String;
+    fn symbol(&self) -> Option<String>;
+    fn payload_json(&self) -> String;
+}
+
+impl EventExt for Event {
+    fn event_type(&self) -> String {
+        match &self.payload {
+            EventPayload::BookUpdate(_) => "book_update".to_string(),
+            EventPayload::Trade(_) => "trade".to_string(),
+            EventPayload::Signal(_) => "signal".to_string(),
+            EventPayload::Order(_) => "order".to_string(),
+            EventPayload::Fill(_) => "fill".to_string(),
+            EventPayload::RiskAlert(_) => "risk_alert".to_string(),
+        }
+    }
+
+    fn symbol(&self) -> Option<String> {
+        match &self.payload {
+            EventPayload::BookUpdate(b) => Some(b.symbol.as_str().to_string()),
+            EventPayload::Trade(t) => Some(t.symbol.as_str().to_string()),
+            EventPayload::Signal(s) => Some(s.symbol.as_str().to_string()),
+            EventPayload::Order(o) => Some(o.symbol.as_str().to_string()),
+            EventPayload::Fill(f) => Some(f.symbol.as_str().to_string()),
+            EventPayload::RiskAlert(_) => None,
+        }
+    }
+
+    fn payload_json(&self) -> String {
+        // Serialize payload to JSON for storage
+        match &self.payload {
+            EventPayload::BookUpdate(b) => format!(
+                r#"{{"bids":{},"asks":{},"sequence":{}}}"#,
+                b.bids.len(),
+                b.asks.len(),
+                b.sequence
+            ),
+            EventPayload::Trade(t) => format!(
+                r#"{{"price":"{}","quantity":"{}","side":"{}"}}"#,
+                t.price,
+                t.quantity,
+                match t.side {
+                    mercury_core::Side::Buy => "buy",
+                    mercury_core::Side::Sell => "sell",
+                }
+            ),
+            EventPayload::Signal(s) => format!(
+                r#"{{"strategy":"{}","side":"{}","quantity":"{}"}}"#,
+                s.strategy,
+                match s.side {
+                    mercury_core::Side::Buy => "buy",
+                    mercury_core::Side::Sell => "sell",
+                },
+                s.quantity
+            ),
+            EventPayload::Order(o) => format!(
+                r#"{{"id":{},"side":"{}","quantity":"{}"}}"#,
+                o.id,
+                match o.side {
+                    mercury_core::Side::Buy => "buy",
+                    mercury_core::Side::Sell => "sell",
+                },
+                o.quantity
+            ),
+            EventPayload::Fill(f) => format!(
+                r#"{{"order_id":{},"price":"{}","quantity":"{}"}}"#,
+                f.order_id, f.price, f.quantity
+            ),
+            EventPayload::RiskAlert(r) => format!(r#"{{"message":"{}"}}"#, r.message),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mercury_core::{BookUpdate, Exchange, Level, Symbol};
+    use rust_decimal_macros::dec;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_recorder_basic() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.parquet");
+
+        let mut recorder = Recorder::new(path, 100).unwrap();
+
+        let event = Event {
+            id: 1,
+            timestamp: 1234567890,
+            payload: EventPayload::BookUpdate(BookUpdate {
+                exchange: Exchange::Binance,
+                symbol: Symbol::new("BTCUSDT"),
+                bids: vec![Level::new(dec!(50000), dec!(1.0))],
+                asks: vec![Level::new(dec!(50001), dec!(1.0))],
+                sequence: 1,
+                is_snapshot: false,
+            }),
+        };
+
+        recorder.record(event).unwrap();
+        recorder.close().unwrap();
     }
 }

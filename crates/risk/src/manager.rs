@@ -163,6 +163,11 @@ impl RiskManager {
         *self.daily_pnl.read()
     }
 
+    /// Get configuration.
+    pub fn config(&self) -> &RiskConfig {
+        &self.config
+    }
+
     /// Reset daily state.
     pub fn reset_daily(&self) {
         *self.daily_pnl.write() = Decimal::ZERO;

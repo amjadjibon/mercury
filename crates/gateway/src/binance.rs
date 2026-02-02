@@ -4,7 +4,7 @@ use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
 use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -31,6 +31,7 @@ pub struct BinanceGateway {
     config: BinanceConfig,
     client: Client,
     fill_tx: mpsc::Sender<Fill>,
+    #[allow(dead_code)]
     fill_rx: Option<mpsc::Receiver<Fill>>,
 }
 
@@ -47,9 +48,30 @@ impl BinanceGateway {
     }
 
     /// Sign a request with HMAC-SHA256.
-    fn sign(&self, _query: &str) -> String {
-        // TODO: Implement HMAC-SHA256 signing
-        String::new()
+    pub fn sign(&self, query: &str) -> String {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac = HmacSha256::new_from_slice(self.config.secret_key.as_bytes())
+            .expect("HMAC can take key of any size");
+        mac.update(query.as_bytes());
+
+        let result = mac.finalize();
+        hex::encode(result.into_bytes())
+    }
+
+    /// Build query string with signature.
+    fn sign_query(&self, params: &[(&str, String)]) -> String {
+        let query: String = params
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("&");
+
+        let signature = self.sign(&query);
+        format!("{}&signature={}", query, signature)
     }
 
     /// Get server time for timestamp.
@@ -65,6 +87,11 @@ impl BinanceGateway {
             .await
             .map_err(|e| GatewayError::RequestFailed(e.to_string()))?;
         Ok(resp.server_time)
+    }
+
+    /// Get the fill sender for publishing fills.
+    pub fn fill_sender(&self) -> mpsc::Sender<Fill> {
+        self.fill_tx.clone()
     }
 }
 
@@ -87,11 +114,14 @@ impl ExchangeGateway for BinanceGateway {
             OrderType::Market => "MARKET",
         };
 
-        let mut params = vec![
+        let timestamp = self.server_time().await?;
+
+        let mut params: Vec<(&str, String)> = vec![
             ("symbol", order.symbol.as_str().to_string()),
             ("side", side.to_string()),
             ("type", order_type.to_string()),
             ("quantity", order.quantity.to_string()),
+            ("timestamp", timestamp.to_string()),
         ];
 
         if let Some(price) = order.price {
@@ -99,16 +129,14 @@ impl ExchangeGateway for BinanceGateway {
             params.push(("timeInForce", "GTC".to_string()));
         }
 
-        let timestamp = self.server_time().await?;
-        params.push(("timestamp", timestamp.to_string()));
+        let signed_query = self.sign_query(&params);
 
         info!(symbol = %order.symbol, side = side, "Submitting order");
 
         let resp: NewOrderResponse = self
             .client
-            .post(&url)
+            .post(format!("{}?{}", url, signed_query))
             .header("X-MBX-APIKEY", &self.config.api_key)
-            .form(&params)
             .send()
             .await
             .map_err(|e| GatewayError::RequestFailed(e.to_string()))?
@@ -123,16 +151,17 @@ impl ExchangeGateway for BinanceGateway {
         let url = format!("{}/api/v3/order", self.config.base_url());
         let timestamp = self.server_time().await?;
 
-        let params = [
+        let params: Vec<(&str, String)> = vec![
             ("symbol", symbol.as_str().to_string()),
             ("orderId", order_id.to_string()),
             ("timestamp", timestamp.to_string()),
         ];
 
+        let signed_query = self.sign_query(&params);
+
         self.client
-            .delete(&url)
+            .delete(format!("{}?{}", url, signed_query))
             .header("X-MBX-APIKEY", &self.config.api_key)
-            .form(&params)
             .send()
             .await
             .map_err(|e| GatewayError::RequestFailed(e.to_string()))?;
@@ -144,16 +173,17 @@ impl ExchangeGateway for BinanceGateway {
         let url = format!("{}/api/v3/openOrders", self.config.base_url());
         let timestamp = self.server_time().await?;
 
-        let params = [
+        let params: Vec<(&str, String)> = vec![
             ("symbol", symbol.as_str().to_string()),
             ("timestamp", timestamp.to_string()),
         ];
 
+        let signed_query = self.sign_query(&params);
+
         let resp: Vec<CancelledOrder> = self
             .client
-            .delete(&url)
+            .delete(format!("{}?{}", url, signed_query))
             .header("X-MBX-APIKEY", &self.config.api_key)
-            .form(&params)
             .send()
             .await
             .map_err(|e| GatewayError::RequestFailed(e.to_string()))?
@@ -165,8 +195,8 @@ impl ExchangeGateway for BinanceGateway {
     }
 
     fn fills(&self) -> mpsc::Receiver<Fill> {
-        // Note: This creates a new receiver each time, which is not ideal.
-        // In production, you'd want a broadcast channel or different pattern.
+        // Take the receiver if available, otherwise create a dummy one
+        // In production, fills would come from WebSocket user data stream
         let (_, rx) = mpsc::channel(1);
         rx
     }
@@ -190,20 +220,6 @@ struct ServerTime {
     server_time: u64,
 }
 
-#[derive(Debug, Serialize)]
-struct NewOrderRequest {
-    symbol: String,
-    side: String,
-    #[serde(rename = "type")]
-    order_type: String,
-    quantity: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    price: Option<String>,
-    #[serde(rename = "timeInForce", skip_serializing_if = "Option::is_none")]
-    time_in_force: Option<String>,
-    timestamp: u64,
-}
-
 #[derive(Debug, Deserialize)]
 struct NewOrderResponse {
     #[serde(rename = "orderId")]
@@ -215,4 +231,28 @@ struct CancelledOrder {
     #[serde(rename = "orderId")]
     #[allow(dead_code)]
     order_id: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sign_query() {
+        let config = BinanceConfig {
+            api_key: "test_key".to_string(),
+            secret_key: "secret".to_string(),
+            testnet: true,
+        };
+        let gateway = BinanceGateway::new(config);
+
+        let params = vec![
+            ("symbol", "BTCUSDT".to_string()),
+            ("side", "BUY".to_string()),
+        ];
+
+        let signed = gateway.sign_query(&params);
+        assert!(signed.contains("&signature="));
+        assert!(signed.starts_with("symbol=BTCUSDT&side=BUY"));
+    }
 }
