@@ -1,0 +1,13 @@
+[package]
+name = "mercury-risk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mercury-core = { path = "../core" }
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

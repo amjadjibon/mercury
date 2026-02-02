@@ -1,0 +1,16 @@
+[package]
+name = "mercury-execution"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mercury-core = { path = "../core" }
+mercury-risk = { path = "../risk" }
+mercury-gateway = { path = "../gateway" }
+tokio.workspace = true
+rust_decimal.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true

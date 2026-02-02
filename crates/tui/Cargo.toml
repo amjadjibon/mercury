@@ -1,0 +1,19 @@
+[package]
+name = "mercury-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mercury-tui"
+path = "src/main.rs"
+
+[dependencies]
+mercury-core = { path = "../core" }
+mercury-market = { path = "../market" }
+mercury-metrics = { path = "../metrics" }
+tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+rust_decimal.workspace = true
+anyhow.workspace = true

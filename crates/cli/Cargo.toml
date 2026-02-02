@@ -1,0 +1,26 @@
+[package]
+name = "mercury-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mercury"
+path = "src/main.rs"
+
+[dependencies]
+mercury-core = { path = "../core" }
+mercury-market = { path = "../market" }
+mercury-gateway = { path = "../gateway" }
+mercury-strategy = { path = "../strategy" }
+mercury-risk = { path = "../risk" }
+mercury-execution = { path = "../execution" }
+mercury-replay = { path = "../replay" }
+mercury-metrics = { path = "../metrics" }
+tokio.workspace = true
+clap = { workspace = true, features = ["env"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
