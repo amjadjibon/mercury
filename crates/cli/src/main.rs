@@ -28,9 +28,13 @@ struct Cli {
 enum Commands {
     /// Run the trading engine
     Run {
-        /// Trading symbol (e.g., BTCUSDT)
+        /// Trading symbol (e.g., BTCUSDT for crypto, AAPL for stocks)
         #[arg(short, long)]
         symbol: String,
+
+        /// Exchange to use (binance, yahoo)
+        #[arg(short, long, default_value = "binance")]
+        exchange: String,
 
         /// Strategy to use (market_maker, momentum)
         #[arg(short = 't', long, default_value = "market_maker")]
@@ -92,12 +96,13 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Run {
             symbol,
+            exchange,
             strategy,
             paper,
             api_key,
             secret_key,
         } => {
-            run_trading(symbol, strategy, paper, api_key, secret_key).await?;
+            run_trading(symbol, exchange, strategy, paper, api_key, secret_key).await?;
         }
         Commands::Replay { file, speed } => {
             run_replay(file, speed).await?;
@@ -112,12 +117,19 @@ async fn main() -> Result<()> {
 
 async fn run_trading(
     symbol: String,
+    exchange: String,
     strategy_name: String,
     paper: bool,
     api_key: Option<String>,
     secret_key: Option<String>,
 ) -> Result<()> {
-    info!(symbol = %symbol, strategy = %strategy_name, paper = paper, "Starting Mercury");
+    info!(
+        symbol = %symbol,
+        exchange = %exchange,
+        strategy = %strategy_name,
+        paper = paper,
+        "Starting Mercury"
+    );
 
     // Create event bus
     let event_bus = Arc::new(EventBus::new(100_000));
@@ -133,19 +145,28 @@ async fn run_trading(
     // Store risk manager for later use
     let _risk_manager = risk_manager;
 
-    // Create gateway
-    let gateway_config = BinanceConfig {
-        api_key: api_key.unwrap_or_default(),
-        secret_key: secret_key.unwrap_or_default(),
-        testnet: paper,
-    };
-    let mut gateway = BinanceGateway::new(gateway_config);
-
-    // Connect to gateway
-    if let Err(e) = gateway.connect().await {
-        info!(error = %e, "Failed to connect to gateway (continuing in offline mode)");
-    } else {
-        info!(exchange = "Binance", testnet = paper, "Gateway connected");
+    // Create gateway based on exchange
+    match exchange.as_str() {
+        "binance" => {
+            let gateway_config = BinanceConfig {
+                api_key: api_key.unwrap_or_default(),
+                secret_key: secret_key.unwrap_or_default(),
+                testnet: paper,
+            };
+            let mut gateway = BinanceGateway::new(gateway_config);
+            // Connect to gateway
+            if let Err(e) = gateway.connect().await {
+                info!(error = %e, "Failed to connect to gateway (continuing in offline mode)");
+            } else {
+                info!(exchange = "Binance", testnet = paper, "Gateway connected");
+                // TODO: Store gateway for order execution
+            }
+            let _ = gateway.disconnect().await;
+        }
+        "yahoo" => {
+            info!("Yahoo Finance is read-only (no trading gateway)");
+        }
+        _ => anyhow::bail!("Unknown exchange: {}", exchange),
     }
 
     // Create strategy runner
@@ -165,11 +186,23 @@ async fn run_trading(
         }
     }
 
-    // Create feed manager and subscribe
-    let mut feed_manager = FeedManager::new(Arc::clone(&event_bus));
-    feed_manager
-        .subscribe(BinanceParser, vec![symbol.clone()])
-        .await?;
+    // Run feeds based on exchange
+    let mut binance_feed_manager = FeedManager::new(Arc::clone(&event_bus));
+    let mut yahoo_feed = if exchange == "yahoo" {
+        use mercury_market::YahooFeed;
+        let feed = YahooFeed::new(vec![symbol.clone()]);
+        Some(feed)
+    } else {
+        None
+    };
+
+    if exchange == "binance" {
+        binance_feed_manager
+            .subscribe(BinanceParser, vec![symbol.clone()])
+            .await?;
+    } else if let Some(ref mut feed) = yahoo_feed {
+        feed.start(Arc::clone(&event_bus)).await?;
+    }
 
     info!("Mercury is running. Press Ctrl+C to stop.");
 
@@ -182,9 +215,10 @@ async fn run_trading(
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
 
-    // Disconnect gateway
-    let _ = gateway.disconnect().await;
-    feed_manager.shutdown().await;
+    binance_feed_manager.shutdown().await;
+    if let Some(mut feed) = yahoo_feed {
+        feed.stop().await;
+    }
 
     Ok(())
 }
