@@ -38,7 +38,7 @@ impl StrategyRunner {
                     .books
                     .entry(update.symbol)
                     .or_insert_with(|| OrderBook::new(update.exchange, update.symbol));
-                book.apply(update);
+                book.apply_update(update);
 
                 // Generate signals from all strategies
                 let mut signals = Vec::new();

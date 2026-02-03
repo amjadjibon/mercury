@@ -114,7 +114,7 @@ mod tests {
 
     fn sample_book() -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
-        book.apply(&BookUpdate {
+        book.apply_update(&BookUpdate {
             exchange: Exchange::Binance,
             symbol: Symbol::new("BTCUSDT"),
             bids: vec![Level::new(dec!(50000), dec!(1.0))],

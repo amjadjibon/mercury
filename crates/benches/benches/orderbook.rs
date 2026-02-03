@@ -43,14 +43,14 @@ fn bench_apply_update(c: &mut Criterion) {
         sequence: 0,
         is_snapshot: true,
     };
-    book.apply(&snapshot);
+    book.apply_update(&snapshot);
 
     group.bench_function("apply_10_levels", |b| {
         let mut seq = 1u64;
         b.iter(|| {
             seq += 1;
             let update = create_update(seq, 10);
-            book.apply(black_box(&update));
+            book.apply_update(black_box(&update));
         })
     });
 
@@ -74,7 +74,7 @@ fn bench_best_bid_ask(c: &mut Criterion) {
         sequence: 0,
         is_snapshot: true,
     };
-    book.apply(&snapshot);
+    book.apply_update(&snapshot);
 
     group.bench_function("best_bid", |b| b.iter(|| black_box(book.best_bid())));
 

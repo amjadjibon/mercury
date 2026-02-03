@@ -19,7 +19,9 @@ use rust_decimal::Decimal;
 use std::io;
 use std::time::Duration;
 
+mod ipc;
 mod widgets;
+use ipc::IpcClient;
 use widgets::{ChartWidget, DepthWidget, TradeLogWidget};
 
 /// Application state.
@@ -75,7 +77,36 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new();
-    let result = run_app(&mut terminal, &mut app);
+
+    // Connect to IPC
+    // In a real app we'd handle connection errors gracefully or retry
+    let ipc_client = IpcClient::new(std::path::PathBuf::from("/tmp/mercury.sock"));
+
+    // Spawn IPC connection loop
+    let (tx, rx) = tokio::sync::mpsc::channel::<mercury_core::Event>(100);
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.spawn(async move {
+        loop {
+            match ipc_client.connect().await {
+                Ok(mut stream) => {
+                    // Connected
+                    while let Some(event) = stream.recv().await {
+                        if tx.send(event).await.is_err() {
+                            break;
+                        }
+                    }
+                    // Stream ended (disconnected), retry
+                }
+                Err(_) => {
+                    // Failed to connect, wait and retry
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
+    });
+
+    let result = run_app(&mut terminal, &mut app, rx);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -84,22 +115,51 @@ fn main() -> Result<()> {
     result
 }
 
-fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> Result<()> {
+fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    mut rx: tokio::sync::mpsc::Receiver<mercury_core::Event>,
+) -> Result<()> {
     loop {
-        // Simulate price update for chart demo (since we don't have live feed connected here yet)
-        // In real integration, this would come from EventBus
-        let mock_price = 100.0
-            + (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                % 1000) as f64
-                / 100.0;
-        app.update_price(mock_price);
+        // Poll for IPC events (non-blocking)
+        while let Ok(event) = rx.try_recv() {
+            match event.payload {
+                mercury_core::EventPayload::BookUpdate(update) => {
+                    app.book.apply_update(&update);
+                    // Update price history from best bid/ask
+                    if let Some(best_bid) = app.book.best_bid() {
+                        use rust_decimal::prelude::ToPrimitive;
+                        if let Some(p) = best_bid.price.to_f64() {
+                            app.update_price(p);
+                        }
+                    }
+                }
+                mercury_core::EventPayload::Trade(trade) => {
+                    use rust_decimal::prelude::ToPrimitive;
+                    if let Some(p) = trade.price.to_f64() {
+                        app.update_price(p);
+                        app.trades
+                            .push(format!("Trade: {:.2} @ {:.2}", trade.quantity, trade.price));
+                        if app.trades.len() > 20 {
+                            app.trades.remove(0);
+                        }
+                    }
+                }
+                mercury_core::EventPayload::Fill(fill) => {
+                    app.position += if fill.side == mercury_core::Side::Buy {
+                        fill.quantity
+                    } else {
+                        -fill.quantity
+                    };
+                    // PnL calc is complex, simplified for now
+                }
+                _ => {}
+            }
+        }
 
         terminal.draw(|f| ui(f, app))?;
 
-        if event::poll(Duration::from_millis(100))? {
+        if event::poll(Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press && key.code == KeyCode::Char('q') {
                     return Ok(());
@@ -235,6 +295,19 @@ fn ui(f: &mut Frame, app: &App) {
             Span::styled(
                 format!("{}/{}μs", app.latency_p50 / 1000, app.latency_p99 / 1000),
                 Style::default().fg(Color::Cyan),
+            ),
+            Span::raw(" | Status: "),
+            Span::styled(
+                if app.price_history.is_empty() {
+                    "Waiting..."
+                } else {
+                    "Active"
+                },
+                Style::default().fg(if app.price_history.is_empty() {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                }),
             ),
         ]),
         Line::from("Press 'q' to quit"),

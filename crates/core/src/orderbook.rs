@@ -31,7 +31,7 @@ impl OrderBook {
     }
 
     /// Apply an update to the order book.
-    pub fn apply(&mut self, update: &BookUpdate) {
+    pub fn apply_update(&mut self, update: &BookUpdate) {
         if update.is_snapshot {
             self.bids.clear();
             self.asks.clear();
@@ -169,7 +169,7 @@ mod tests {
             sequence: 1,
             is_snapshot: true,
         };
-        book.apply(&update);
+        book.apply_update(&update);
         book
     }
 
@@ -203,7 +203,7 @@ mod tests {
             sequence: 2,
             is_snapshot: false,
         };
-        book.apply(&update);
+        book.apply_update(&update);
 
         assert_eq!(book.best_bid().unwrap().price, dec!(49999));
         assert_eq!(book.best_ask().unwrap().quantity, dec!(5.0));

@@ -8,12 +8,14 @@
 
 pub mod event_bus;
 pub mod events;
+pub mod ipc;
 pub mod orderbook;
 pub mod pool;
 pub mod types;
 
 pub use event_bus::EventBus;
 pub use events::*;
+pub use ipc::IpcServer;
 pub use orderbook::OrderBook;
 pub use pool::Pool;
 pub use types::*;

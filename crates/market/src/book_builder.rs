@@ -48,7 +48,7 @@ impl BookBuilder {
         }
 
         // Apply the update
-        book.apply(update);
+        book.apply_update(update);
 
         // Update expected sequence
         self.expected_sequence.insert(key, update.sequence + 1);

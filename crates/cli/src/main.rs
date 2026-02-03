@@ -142,6 +142,21 @@ async fn run_trading(
         "Risk manager initialized"
     );
 
+    // Create IPC Server
+    let ipc_server = Arc::new(mercury_core::IpcServer::new(PathBuf::from(
+        "/tmp/mercury.sock",
+    )));
+    ipc_server.start().await?;
+
+    // Broadcast all events to IPC
+    let ipc_clone = Arc::clone(&ipc_server);
+    let ipc_rx = event_bus.subscribe();
+    tokio::spawn(async move {
+        while let Ok(event) = ipc_rx.recv() {
+            ipc_clone.broadcast(event);
+        }
+    });
+
     // Create gateway based on exchange
     let gateway: Arc<dyn ExchangeGateway> = if paper {
         info!("Initializing Paper Trading Gateway (HFT Simulation)");
