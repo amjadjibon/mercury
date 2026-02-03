@@ -2215,6 +2215,7 @@ dependencies = [
  "hmac",
  "mercury-core",
  "reqwest",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2",

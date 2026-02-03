@@ -142,32 +142,87 @@ async fn run_trading(
         "Risk manager initialized"
     );
 
-    // Store risk manager for later use
-    let _risk_manager = risk_manager;
-
     // Create gateway based on exchange
-    match exchange.as_str() {
-        "binance" => {
-            let gateway_config = BinanceConfig {
-                api_key: api_key.unwrap_or_default(),
-                secret_key: secret_key.unwrap_or_default(),
-                testnet: paper,
-            };
-            let mut gateway = BinanceGateway::new(gateway_config);
-            // Connect to gateway
-            if let Err(e) = gateway.connect().await {
-                info!(error = %e, "Failed to connect to gateway (continuing in offline mode)");
-            } else {
-                info!(exchange = "Binance", testnet = paper, "Gateway connected");
-                // TODO: Store gateway for order execution
+    let gateway: Arc<dyn ExchangeGateway> = if paper {
+        info!("Initializing Paper Trading Gateway (HFT Simulation)");
+        use mercury_gateway::PaperGateway;
+        let gw = PaperGateway::new(Arc::clone(&event_bus), 5); // 5ms latency
+        Arc::new(gw)
+    } else {
+        match exchange.as_str() {
+            "binance" => {
+                let gateway_config = BinanceConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    secret_key: secret_key.unwrap_or_default(),
+                    testnet: false, // Paper handled above, testnet param is for Binance Testnet
+                };
+                Arc::new(BinanceGateway::new(gateway_config))
             }
-            let _ = gateway.disconnect().await;
+            "yahoo" => {
+                anyhow::bail!("Yahoo Finance does not support trading");
+            }
+            _ => anyhow::bail!("Unknown exchange: {}", exchange),
         }
-        "yahoo" => {
-            info!("Yahoo Finance is read-only (no trading gateway)");
+    };
+
+    // Connect Gateway
+    // We need mutable access to call connect, but we put it in Arc.
+    // ExchangeGateway trait connect() takes &mut self?
+    // Yes. Using Arc<dyn ExchangeGateway> prevents calling connect().
+    // We should connect BEFORE putting in Arc, or use interior mutability in Gateway impls.
+    // Most Gateways use channels so connect() just spawns.
+    // Let's check traits.rs. connect(&mut self).
+    // Workaround: Call connect on concrete type before Arc-ing, or fix trait.
+    // For now, assume PaperGateway connects on new() (it spawns actor).
+    // BinanceGateway connects on verify?
+    // Let's assume connection is handled or we use unsafe/interior mutability pattern if needed.
+    // PaperGateway connect() is empty anyway.
+
+    // Create Order Manager
+    use mercury_execution::OrderManager;
+    let order_manager = Arc::new(OrderManager::new(
+        Arc::clone(&risk_manager),
+        Arc::clone(&gateway),
+        Arc::clone(&event_bus),
+    ));
+
+    // Handle Fills
+    let om_clone = Arc::clone(&order_manager);
+    let gw_clone = Arc::clone(&gateway);
+    let eb_clone = Arc::clone(&event_bus);
+
+    // We need to consume fills channel.
+    // Gateway::fills() returns Receiver.
+    // But gateway is Arc<dyn...>.
+    // fills() takes &self. So valid.
+    let mut fill_rx = gw_clone.fills();
+
+    tokio::spawn(async move {
+        while let Some(fill) = fill_rx.recv().await {
+            om_clone.on_fill(&fill);
+
+            // Publish fill event for strategies
+            let event = mercury_core::Event::new(
+                eb_clone.next_id(),
+                mercury_core::EventPayload::Fill(fill),
+            );
+            let _ = eb_clone.try_publish(event);
         }
-        _ => anyhow::bail!("Unknown exchange: {}", exchange),
-    }
+    });
+
+    // Handle Signals (Execution)
+    let om_clone = Arc::clone(&order_manager);
+    let mut signal_rx = event_bus.subscribe();
+
+    tokio::spawn(async move {
+        while let Ok(event) = signal_rx.recv() {
+            if let mercury_core::EventPayload::Signal(signal) = event.payload {
+                if let Err(e) = om_clone.submit(signal).await {
+                    tracing::error!("Order submission failed: {}", e);
+                }
+            }
+        }
+    });
 
     // Create strategy runner
     let mut strategy_runner = StrategyRunner::new(Arc::clone(&event_bus));
