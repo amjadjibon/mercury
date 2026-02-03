@@ -74,6 +74,17 @@ Primary goals:
 - event driven signal generation
 - market making strategy with inventory skew
 - momentum strategy based on trade flow
+- **Technical Analysis Engine**:
+  - Indicators: SMA, EMA, RSI, MACD
+  - `Window` trait for rolling calculations
+  - `RsiStrategy` implementation
+
+### Advanced TUI Dashboard
+
+- Real-time price charts (Ratatui)
+- Order book depth visualization (Histogram)
+- Live trade log scrolling
+- Performance metrics panel
 
 ### Risk Controls
 
@@ -95,7 +106,17 @@ Primary goals:
 
 - raw tick recording to parquet
 - deterministic replay
-- faster than realtime backtesting
+- **Backtesting Engine**:
+  - `SimulatedExchange` for offline matching
+  - PnL and Max Drawdown tracking
+  - Faster than real-time simulation
+
+### Paper Trading (HFT Simulation)
+
+- **Local Matching Engine**: Matches orders against live market data streams
+- **Latency Simulation**: Configurable network RTT (e.g., 5ms)
+- **High Throughput**: Async actor-based order handling
+- **Safe Execution**: Test strategies with zero financial risk using live data
 
 ### Observability
 
@@ -190,14 +211,14 @@ mercury run --symbol BTCUSDT --strategy market_maker
 # Run with environment variables for API keys
 BINANCE_API_KEY=xxx BINANCE_SECRET_KEY=yyy mercury run --symbol BTCUSDT
 
-# Paper trading mode (uses testnet)
-mercury run --symbol BTCUSDT --paper
+# Paper trading mode (HFT simulation with 5ms latency)
+mercury run --symbol BTCUSDT --paper --strategy rsi
 
 # Replay historical data
 mercury replay --file data.parquet --speed 1.0
 
 # Backtest a strategy
-mercury backtest --file data.parquet --strategy momentum
+mercury backtest --file data.parquet --strategy rsi
 ```
 
 ---
