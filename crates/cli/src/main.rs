@@ -36,7 +36,7 @@ enum Commands {
         #[arg(short, long, default_value = "binance")]
         exchange: String,
 
-        /// Strategy to use (market_maker, momentum)
+        /// Strategy to use (market_maker, momentum, rsi, arbitrage)
         #[arg(short = 't', long, default_value = "market_maker")]
         strategy: String,
 
@@ -239,6 +239,15 @@ async fn run_trading(
         "rsi" => {
             let rsi = mercury_strategy::RsiStrategy::new(symbol.clone(), 14, dec!(1.0));
             strategy_runner.add_strategy(Box::new(rsi));
+        }
+        "arbitrage" => {
+            // Min profit 10 USDT, Trade size 0.1
+            let arb = mercury_strategy::ArbitrageStrategy::new(
+                mercury_core::Symbol::new(&symbol),
+                dec!(10.0),
+                dec!(0.1),
+            );
+            strategy_runner.add_strategy(Box::new(arb));
         }
         _ => {
             anyhow::bail!("Unknown strategy: {}", strategy_name);
