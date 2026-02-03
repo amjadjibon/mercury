@@ -2,11 +2,9 @@
 
 use crate::traits::{ExchangeGateway, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{
-    EventBus, EventPayload, Exchange, Fill, Order, OrderId, OrderStatus, Side, Symbol,
-};
+use mercury_core::{EventBus, EventPayload, Exchange, Fill, Order, OrderId, Side, Symbol};
 use rust_decimal::Decimal;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio::time::{Duration, sleep};

@@ -212,7 +212,7 @@ async fn run_trading(
 
     // Handle Signals (Execution)
     let om_clone = Arc::clone(&order_manager);
-    let mut signal_rx = event_bus.subscribe();
+    let signal_rx = event_bus.subscribe();
 
     tokio::spawn(async move {
         while let Ok(event) = signal_rx.recv() {
@@ -315,7 +315,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     }
 
     // Subscribe to events
-    let mut rx = event_bus.subscribe();
+    let rx = event_bus.subscribe();
     let mut exchange = mercury_execution::SimulatedExchange::new(dec!(10000));
     let mut event_count = 0;
 
