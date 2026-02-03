@@ -181,6 +181,10 @@ async fn run_trading(
             let mom = mercury_strategy::Momentum::new(20, dec!(0.3), dec!(0.01));
             strategy_runner.add_strategy(Box::new(mom));
         }
+        "rsi" => {
+            let rsi = mercury_strategy::RsiStrategy::new(symbol.clone(), 14, dec!(1.0));
+            strategy_runner.add_strategy(Box::new(rsi));
+        }
         _ => {
             anyhow::bail!("Unknown strategy: {}", strategy_name);
         }
@@ -255,13 +259,79 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
         }
     }
 
-    // Replay data
-    let player = mercury_replay::Player::new(file, 0.0);
-    let count = player.play(Arc::clone(&event_bus)).await?;
+    // Subscribe to events
+    let mut rx = event_bus.subscribe();
+    let mut exchange = mercury_execution::SimulatedExchange::new(dec!(10000));
+    let mut event_count = 0;
 
-    // Run strategy
-    strategy_runner.run();
+    // Start replay in background
+    let play_bus = Arc::clone(&event_bus);
+    tokio::spawn(async move {
+        // Run replay (this will push events to bus)
+        if let Err(e) = mercury_replay::Player::new(file, 0.0).play(play_bus).await {
+            tracing::error!("Replay error: {}", e);
+        }
+    });
 
-    info!(events = count, "Backtest complete");
+    // Event loop
+    // We break when we assume replay is done (timeout or sentinel)
+    // For now simple timeout if no events for a while
+    while let Ok(event) = rx.recv() {
+        event_count += 1;
+
+        // 1. Update Exchange & Check Fills
+        match &event.payload {
+            mercury_core::EventPayload::BookUpdate(update) => {
+                let fills = exchange.on_book_update(update);
+                for fill in fills {
+                    // Notify strategy of fills
+                    let fill_event = mercury_core::Event::new(
+                        event_bus.next_id(),
+                        mercury_core::EventPayload::Fill(fill),
+                    );
+                    strategy_runner.process(&fill_event);
+                }
+            }
+            mercury_core::EventPayload::Trade(trade) => {
+                exchange.on_trade(trade);
+            }
+            _ => {}
+        }
+
+        // 2. Run Strategy
+        let signals = strategy_runner.process(&event);
+
+        // 3. Execute Signals
+        for signal in signals {
+            let order = mercury_core::Order {
+                id: event_bus.next_id(),
+                symbol: signal.symbol,
+                exchange: mercury_core::Exchange::Binance, // Generic
+                side: signal.side,
+                order_type: signal.order_type,
+                price: signal.price,
+                quantity: signal.quantity,
+                time_in_force: mercury_core::TimeInForce::GTC,
+                created_at: mercury_core::types::now_nanos(),
+            };
+            match exchange.submit_order(order) {
+                _ => {}
+            }
+        }
+
+        if event_count % 1000 == 0 {
+            info!(events = event_count, "Processed events");
+        }
+    }
+
+    let result = exchange.result();
+    info!("Backtest Result: {:?}", result);
+    println!("\n=== Backtest Complete ===");
+    println!("Total Trades: {}", result.total_trades);
+    println!("Total Volume: {}", result.total_volume);
+    println!("PnL: {:.2} USDT", result.pnl);
+    println!("Max Drawdown: {:.2}%", result.max_drawdown * dec!(100));
+    println!("=========================\n");
+
     Ok(())
 }
