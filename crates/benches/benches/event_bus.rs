@@ -23,7 +23,10 @@ fn bench_publish(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let bus = EventBus::new(1_000_000);
-    let _rx = bus.subscribe();
+    let rx = bus.subscribe();
+
+    // Drain the channel in background to prevent full buffer
+    std::thread::spawn(move || while rx.recv().is_ok() {});
 
     group.bench_function("publish", |b| {
         let mut id = 0u64;
