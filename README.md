@@ -288,11 +288,3 @@ Key dependencies (latest versions):
 MIT License - See [LICENSE](LICENSE) for details.
 
 ---
-
-## Resume Summary
-
-Example description:
-
-> Built a low latency event driven trading engine in Rust consuming L2 order book data and executing across multiple exchanges. Implemented smart routing, strict risk controls, deterministic replay, and execution quality metrics. Optimized hot paths using lock free queues and memory preallocation to achieve sub millisecond p99 latency.
-
----
