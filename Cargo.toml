@@ -11,7 +11,7 @@ members = [
     "crates/metrics",
     "crates/cli",
     "crates/tui",
-    "crates/benches",
+    "crates/benches", "crates/storage",
 ]
 
 [workspace.package]

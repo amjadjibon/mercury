@@ -17,6 +17,7 @@ mercury-risk = { path = "../risk" }
 mercury-execution = { path = "../execution" }
 mercury-replay = { path = "../replay" }
 mercury-metrics = { path = "../metrics" }
+mercury-storage = { path = "../storage" }
 tokio.workspace = true
 clap = { workspace = true, features = ["env"] }
 tracing.workspace = true

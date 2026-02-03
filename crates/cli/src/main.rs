@@ -142,6 +142,17 @@ async fn run_trading(
         "Risk manager initialized"
     );
 
+    // Initialize Storage
+    let storage_manager = Arc::new(mercury_storage::StorageManager::new("mercury.db").await?);
+    let storage_rx = event_bus.subscribe();
+    let storage_clone = Arc::clone(&storage_manager);
+    
+    tokio::spawn(async move {
+        while let Ok(event) = storage_rx.recv() {
+            storage_clone.store_event(&event).await;
+        }
+    });
+
     // Create IPC Server
     let ipc_server = Arc::new(mercury_core::IpcServer::new(PathBuf::from(
         "/tmp/mercury.sock",

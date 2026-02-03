@@ -1,0 +1,18 @@
+[package]
+name = "mercury-storage"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mercury-core = { path = "../core" }
+tokio.workspace = true
+serde.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
+chrono = "0.4"
+rust_decimal = { version = "1.37", features = ["maths"] }
+
+[dev-dependencies]
+rust_decimal_macros.workspace = true
