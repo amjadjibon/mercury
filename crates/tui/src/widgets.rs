@@ -151,25 +151,3 @@ impl<'a> DepthWidget<'a> {
     }
 }
 
-pub struct TradeLogWidget<'a> {
-    pub trades: &'a [String],
-}
-
-impl<'a> TradeLogWidget<'a> {
-    pub fn new(trades: &'a [String]) -> Self {
-        Self { trades }
-    }
-
-    pub fn render(&self) -> ratatui::widgets::List<'_> {
-        let items: Vec<ratatui::widgets::ListItem> = self
-            .trades
-            .iter()
-            .rev() // Show newest first
-            .take(20)
-            .map(|t| ratatui::widgets::ListItem::new(Span::raw(t)))
-            .collect();
-
-        ratatui::widgets::List::new(items)
-            .block(Block::default().title("Trade Log").borders(Borders::ALL))
-    }
-}

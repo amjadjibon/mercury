@@ -2,7 +2,7 @@
 //!
 //! Simulates exchange execution logic against historical data.
 
-use mercury_core::{BookUpdate, Order, OrderId, OrderStatus, Side, Trade};
+use mercury_core::{BookUpdate, Exchange, Order, OrderBook, OrderId, OrderStatus, Side, Symbol, Trade};
 use rust_decimal::Decimal;
 use std::collections::{HashMap, VecDeque};
 use tracing::{debug, info};
@@ -29,6 +29,7 @@ pub struct SimulatedExchange {
     volume: Decimal,
     peak_equity: Decimal,
     max_drawdown: Decimal,
+    book: OrderBook,
 }
 
 impl SimulatedExchange {
@@ -44,6 +45,7 @@ impl SimulatedExchange {
             volume: Decimal::ZERO,
             peak_equity: initial_cash,
             max_drawdown: Decimal::ZERO,
+            book: OrderBook::new(Exchange::Binance, Symbol::new("")),
         }
     }
 
@@ -70,14 +72,13 @@ impl SimulatedExchange {
 
     /// Process a book update (for limit orders).
     pub fn on_book_update(&mut self, update: &BookUpdate) -> Vec<mercury_core::Fill> {
-        let best_bid = update.bids.first().map(|l| l.price).unwrap_or_default();
-        let best_ask = update.asks.first().map(|l| l.price).unwrap_or(Decimal::MAX);
+        self.book.apply_update(update);
+
+        let best_bid = self.book.best_bid().map(|l| l.price).unwrap_or_default();
+        let best_ask = self.book.best_ask().map(|l| l.price).unwrap_or(Decimal::MAX);
 
         let mut fills = Vec::new();
-        // Check buys
         fills.extend(self.match_orders(Side::Buy, best_ask));
-
-        // Check sells
         fills.extend(self.match_orders(Side::Sell, best_bid));
 
         fills

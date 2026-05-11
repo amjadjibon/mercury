@@ -156,22 +156,37 @@ async fn run_trading(
     // Create event bus
     let event_bus = Arc::new(EventBus::new(100_000));
 
-    // Create risk manager
-    let risk_manager = Arc::new(RiskManager::new(RiskConfig::default()));
+    // Create risk manager — paper trading uses relaxed order rate (no real exchange limits)
+    let risk_config = if paper {
+        RiskConfig {
+            max_orders_per_second: 1000,
+            ..RiskConfig::default()
+        }
+    } else {
+        RiskConfig::default()
+    };
+    let risk_manager = Arc::new(RiskManager::new(risk_config));
     info!(
         default_max_position = %risk_manager.config().default_max_position,
         daily_loss_limit = %risk_manager.config().daily_loss_limit,
+        max_orders_per_second = %risk_manager.config().max_orders_per_second,
         "Risk manager initialized"
     );
 
     // Initialize Storage
     let storage_manager = Arc::new(mercury_storage::StorageManager::new("mercury.db").await?);
-    let storage_rx = event_bus.subscribe();
+    let mut storage_rx = event_bus.subscribe_all();
     let storage_clone = Arc::clone(&storage_manager);
-    
+
     tokio::spawn(async move {
-        while let Ok(event) = storage_rx.recv() {
-            storage_clone.store_event(&event).await;
+        loop {
+            match storage_rx.recv().await {
+                Ok(event) => storage_clone.store_event(&event).await,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(dropped = n, "Storage subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 
@@ -183,10 +198,16 @@ async fn run_trading(
 
     // Broadcast all events to IPC
     let ipc_clone = Arc::clone(&ipc_server);
-    let ipc_rx = event_bus.subscribe();
+    let mut ipc_rx = event_bus.subscribe_all();
     tokio::spawn(async move {
-        while let Ok(event) = ipc_rx.recv() {
-            ipc_clone.broadcast(event);
+        loop {
+            match ipc_rx.recv().await {
+                Ok(event) => ipc_clone.broadcast(event),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(dropped = n, "IPC subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 
@@ -260,14 +281,22 @@ async fn run_trading(
 
     // Handle Signals (Execution)
     let om_clone = Arc::clone(&order_manager);
-    let signal_rx = event_bus.subscribe();
+    let mut signal_rx = event_bus.subscribe_all();
 
     tokio::spawn(async move {
-        while let Ok(event) = signal_rx.recv() {
-            if let mercury_core::EventPayload::Signal(signal) = event.payload {
-                if let Err(e) = om_clone.submit(signal).await {
-                    tracing::error!("Order submission failed: {}", e);
+        loop {
+            match signal_rx.recv().await {
+                Ok(event) => {
+                    if let mercury_core::EventPayload::Signal(signal) = event.payload {
+                        if let Err(e) = om_clone.submit(signal).await {
+                            tracing::error!("Order submission failed: {}", e);
+                        }
+                    }
                 }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(dropped = n, "Signal subscriber lagged");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     });

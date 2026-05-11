@@ -1,15 +1,10 @@
 //! Event player for deterministic replay.
 
 use arrow::array::{Array, Int64Array, StringArray, UInt64Array};
-use mercury_core::{
-    BookUpdate, Event, EventBus, EventPayload, Exchange, Fill, Level, Order, OrderType, RiskAlert,
-    RiskAlertType, Side, Signal, Symbol, TimeInForce, Trade,
-};
+use mercury_core::{Event, EventBus, EventPayload};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use rust_decimal::Decimal;
 use std::fs::File;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
@@ -116,7 +111,8 @@ impl Player {
                 last_timestamp = timestamp;
 
                 // Parse event and publish
-                if let Some(event) = self.parse_event(id, timestamp, event_type, symbol) {
+                let payload_json = payload_col.value(i);
+                if let Some(event) = self.parse_event(id, timestamp, event_type, symbol, payload_json) {
                     let _ = event_bus.publish(event);
                     count += 1;
                 }
@@ -133,67 +129,28 @@ impl Player {
         id: u64,
         timestamp: i64,
         event_type: &str,
-        symbol: Option<&str>,
+        _symbol: Option<&str>,
+        payload_json: &str,
     ) -> Option<Event> {
-        let sym = Symbol::new(symbol.unwrap_or("UNKNOWN"));
+        let payload: EventPayload = serde_json::from_str(payload_json)
+            .map_err(|e| tracing::warn!(event_type, error = %e, "Failed to deserialize payload"))
+            .ok()?;
 
-        let payload = match event_type {
-            "book_update" => EventPayload::BookUpdate(BookUpdate {
-                exchange: Exchange::Binance,
-                symbol: sym,
-                bids: vec![Level::new(Decimal::ZERO, Decimal::ZERO)],
-                asks: vec![Level::new(Decimal::ZERO, Decimal::ZERO)],
-                sequence: 0,
-                is_snapshot: false,
-            }),
-            "trade" => EventPayload::Trade(Trade {
-                exchange: Exchange::Binance,
-                symbol: sym,
-                price: Decimal::ZERO,
-                quantity: Decimal::ZERO,
-                side: Side::Buy,
-                trade_id: 0,
-                timestamp,
-            }),
-            "signal" => EventPayload::Signal(Signal {
-                symbol: sym,
-                side: Side::Buy,
-                order_type: OrderType::Market,
-                price: None,
-                quantity: Decimal::from_str("0.1").unwrap_or_default(),
-                strategy: "replay".to_string(),
-            }),
-            "order" => EventPayload::Order(Order {
-                id,
-                exchange: Exchange::Binance,
-                symbol: sym,
-                side: Side::Buy,
-                order_type: OrderType::Market,
-                price: None,
-                quantity: Decimal::from_str("0.1").unwrap_or_default(),
-                time_in_force: TimeInForce::GTC,
-                created_at: timestamp,
-            }),
-            "fill" => EventPayload::Fill(Fill {
-                order_id: id,
-                exchange: Exchange::Binance,
-                symbol: sym,
-                side: Side::Buy,
-                price: Decimal::ZERO,
-                quantity: Decimal::from_str("0.1").unwrap_or_default(),
-                fee: Decimal::ZERO,
-                fee_asset: "USDT".to_string(),
-                is_maker: false,
-                trade_id: 0,
-                timestamp,
-            }),
-            "risk_alert" => EventPayload::RiskAlert(RiskAlert {
-                alert_type: RiskAlertType::KillSwitchActivated,
-                message: "Replay event".to_string(),
-                timestamp,
-            }),
-            _ => return None,
-        };
+        // Validate event type matches payload
+        let type_matches = matches!(
+            (&payload, event_type),
+            (EventPayload::BookUpdate(_), "book_update")
+                | (EventPayload::Trade(_), "trade")
+                | (EventPayload::Signal(_), "signal")
+                | (EventPayload::Order(_), "order")
+                | (EventPayload::Fill(_), "fill")
+                | (EventPayload::RiskAlert(_), "risk_alert")
+        );
+
+        if !type_matches {
+            tracing::warn!(event_type, "Payload type mismatch, skipping event");
+            return None;
+        }
 
         Some(Event {
             id,

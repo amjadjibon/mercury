@@ -165,47 +165,7 @@ impl EventExt for Event {
     }
 
     fn payload_json(&self) -> String {
-        // Serialize payload to JSON for storage
-        match &self.payload {
-            EventPayload::BookUpdate(b) => format!(
-                r#"{{"bids":{},"asks":{},"sequence":{}}}"#,
-                b.bids.len(),
-                b.asks.len(),
-                b.sequence
-            ),
-            EventPayload::Trade(t) => format!(
-                r#"{{"price":"{}","quantity":"{}","side":"{}"}}"#,
-                t.price,
-                t.quantity,
-                match t.side {
-                    mercury_core::Side::Buy => "buy",
-                    mercury_core::Side::Sell => "sell",
-                }
-            ),
-            EventPayload::Signal(s) => format!(
-                r#"{{"strategy":"{}","side":"{}","quantity":"{}"}}"#,
-                s.strategy,
-                match s.side {
-                    mercury_core::Side::Buy => "buy",
-                    mercury_core::Side::Sell => "sell",
-                },
-                s.quantity
-            ),
-            EventPayload::Order(o) => format!(
-                r#"{{"id":{},"side":"{}","quantity":"{}"}}"#,
-                o.id,
-                match o.side {
-                    mercury_core::Side::Buy => "buy",
-                    mercury_core::Side::Sell => "sell",
-                },
-                o.quantity
-            ),
-            EventPayload::Fill(f) => format!(
-                r#"{{"order_id":{},"price":"{}","quantity":"{}"}}"#,
-                f.order_id, f.price, f.quantity
-            ),
-            EventPayload::RiskAlert(r) => format!(r#"{{"message":"{}"}}"#, r.message),
-        }
+        serde_json::to_string(&self.payload).unwrap_or_else(|_| "{}".to_string())
     }
 }
 

@@ -18,6 +18,10 @@ pub struct MarketMaker {
     inventory: Quantity,
     /// Maximum inventory before skewing.
     max_inventory: Quantity,
+    /// Book update counter for throttling quote frequency.
+    tick_count: u32,
+    /// Requote every N book updates (default 5 = every 500ms at 100ms tick rate).
+    quote_interval: u32,
 }
 
 impl MarketMaker {
@@ -28,7 +32,15 @@ impl MarketMaker {
             order_size,
             inventory: Decimal::ZERO,
             max_inventory,
+            tick_count: 0,
+            quote_interval: 5,
         }
+    }
+
+    /// Set how many book updates to skip between requotes.
+    pub fn with_quote_interval(mut self, interval: u32) -> Self {
+        self.quote_interval = interval;
+        self
     }
 
     /// Calculate skew based on current inventory.
@@ -62,6 +74,11 @@ impl Strategy for MarketMaker {
     }
 
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {
+        self.tick_count += 1;
+        if self.tick_count % self.quote_interval != 0 {
+            return vec![];
+        }
+
         let mid = match book.mid_price() {
             Some(m) => m,
             None => return vec![],
@@ -103,6 +120,7 @@ impl Strategy for MarketMaker {
 
     fn reset(&mut self) {
         self.inventory = Decimal::ZERO;
+        self.tick_count = 0;
     }
 }
 

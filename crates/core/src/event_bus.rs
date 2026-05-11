@@ -4,6 +4,7 @@ use crate::events::Event;
 use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
+use tokio::sync::broadcast;
 
 /// Event bus errors.
 #[derive(Debug, Error)]
@@ -25,30 +26,25 @@ impl<T> From<TrySendError<T>> for EventBusError {
 
 /// Lock-free event bus for high-throughput message passing.
 ///
-/// Uses bounded crossbeam channels for backpressure and lock-free operation.
+/// Crossbeam bounded channel serves the hot-path single consumer (StrategyRunner).
+/// Tokio broadcast channel fans out to all observers (IPC, Storage, etc.) so every
+/// subscriber receives every event without competing.
 #[derive(Clone)]
 pub struct EventBus {
     sender: Sender<Event>,
     receiver: Receiver<Event>,
+    broadcast_tx: broadcast::Sender<Event>,
     next_id: std::sync::Arc<AtomicU64>,
 }
 
 impl EventBus {
-    /// Create a new event bus with the given capacity.
-    ///
-    /// # Arguments
-    /// * `capacity` - Maximum number of events that can be buffered.
-    ///
-    /// # Example
-    /// ```
-    /// use mercury_core::EventBus;
-    /// let bus = EventBus::new(10_000);
-    /// ```
     pub fn new(capacity: usize) -> Self {
         let (sender, receiver) = bounded(capacity);
+        let (broadcast_tx, _) = broadcast::channel(capacity.min(65536));
         Self {
             sender,
             receiver,
+            broadcast_tx,
             next_id: std::sync::Arc::new(AtomicU64::new(1)),
         }
     }
@@ -60,22 +56,32 @@ impl EventBus {
 
     /// Publish an event to the bus.
     ///
-    /// Returns immediately if the bus is full (non-blocking).
+    /// Sends to both the hot-path crossbeam channel and the broadcast fan-out.
+    /// Returns immediately if the crossbeam channel is full (non-blocking).
     pub fn try_publish(&self, event: Event) -> Result<(), EventBusError> {
+        let _ = self.broadcast_tx.send(event.clone());
         self.sender.try_send(event)?;
         Ok(())
     }
 
-    /// Publish an event, blocking if the bus is full.
+    /// Publish an event, blocking if the crossbeam channel is full.
     pub fn publish(&self, event: Event) -> Result<(), EventBusError> {
+        let _ = self.broadcast_tx.send(event.clone());
         self.sender
             .send(event)
             .map_err(|_| EventBusError::Disconnected)
     }
 
-    /// Subscribe to events (get a receiver clone).
+    /// Subscribe via crossbeam (MPMC work-stealing). Use only for the single
+    /// primary hot-path consumer (StrategyRunner). Each event goes to one receiver.
     pub fn subscribe(&self) -> Receiver<Event> {
         self.receiver.clone()
+    }
+
+    /// Subscribe to all events via tokio broadcast fan-out. Every subscriber
+    /// receives every event independently. Use for IPC, storage, signal handlers.
+    pub fn subscribe_all(&self) -> broadcast::Receiver<Event> {
+        self.broadcast_tx.subscribe()
     }
 
     /// Try to receive an event without blocking.
