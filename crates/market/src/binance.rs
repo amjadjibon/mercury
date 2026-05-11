@@ -17,22 +17,29 @@ impl FeedParser for BinanceParser {
     fn parse(&self, msg: &[u8]) -> Result<FeedMessage, ParseError> {
         let text = std::str::from_utf8(msg).map_err(|e| ParseError::InvalidJson(e.to_string()))?;
 
-        // Try to parse as depth update first
-        if let Ok(depth) = serde_json::from_str::<BinanceDepthUpdate>(text) {
-            return Ok(self.parse_depth_update(depth));
-        }
-
-        // Try to parse as trade
-        if let Ok(trade) = serde_json::from_str::<BinanceTrade>(text) {
-            return Ok(self.parse_trade(trade));
-        }
-
         // Check for ping
         if text.contains("\"ping\"") {
             return Ok(FeedMessage::Ping);
         }
 
-        Err(ParseError::UnknownMessage(text.to_string()))
+        // Unwrap combined stream envelope: {"stream":"...","data":{...}}
+        let inner = if let Ok(envelope) = serde_json::from_str::<CombinedStreamEnvelope>(text) {
+            envelope.data.to_string()
+        } else {
+            text.to_string()
+        };
+
+        // Try to parse as depth update first
+        if let Ok(depth) = serde_json::from_str::<BinanceDepthUpdate>(&inner) {
+            return Ok(self.parse_depth_update(depth));
+        }
+
+        // Try to parse as trade
+        if let Ok(trade) = serde_json::from_str::<BinanceTrade>(&inner) {
+            return Ok(self.parse_trade(trade));
+        }
+
+        Err(ParseError::UnknownMessage(inner))
     }
 
     fn ws_url(&self, symbols: &[String]) -> String {
@@ -103,6 +110,14 @@ impl BinanceParser {
         let quantity = Decimal::from_str(&level[1]).ok()?;
         Some(Level::new(price, quantity))
     }
+}
+
+/// Combined stream envelope: {"stream":"btcusdt@depth@100ms","data":{...}}
+#[derive(Debug, Deserialize)]
+struct CombinedStreamEnvelope {
+    #[allow(dead_code)]
+    stream: String,
+    data: serde_json::Value,
 }
 
 /// Binance depth update message.
@@ -189,6 +204,22 @@ mod tests {
                 assert_eq!(update.bids.len(), 2);
                 assert_eq!(update.asks.len(), 2);
                 assert_eq!(update.sequence, 105);
+            }
+            _ => panic!("Expected DepthUpdate"),
+        }
+    }
+
+    #[test]
+    fn test_parse_combined_stream_envelope() {
+        let parser = BinanceParser;
+        let msg = r#"{"stream":"btcusdt@depth@100ms","data":{"e":"depthUpdate","E":1776274299114,"s":"BTCUSDT","U":100,"u":105,"b":[["74181.89000000","1.84933000"]],"a":[["74181.90000000","2.99345000"]]}}"#;
+
+        let result = parser.parse(msg.as_bytes()).unwrap();
+        match result {
+            FeedMessage::DepthUpdate(update) => {
+                assert_eq!(update.symbol.as_str(), "BTCUSDT");
+                assert_eq!(update.bids.len(), 1);
+                assert_eq!(update.asks.len(), 1);
             }
             _ => panic!("Expected DepthUpdate"),
         }

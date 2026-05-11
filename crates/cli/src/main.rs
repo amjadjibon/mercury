@@ -74,6 +74,21 @@ enum Commands {
         #[arg(short = 't', long)]
         strategy: String,
     },
+
+    /// Record live market data to a Parquet file
+    Record {
+        /// Trading symbol (e.g., BTCUSDT)
+        #[arg(short, long)]
+        symbol: String,
+
+        /// Output Parquet file path
+        #[arg(short, long, default_value = "data.parquet")]
+        output: PathBuf,
+
+        /// Number of seconds to record (0 = run until Ctrl+C)
+        #[arg(short, long, default_value = "60")]
+        duration: u64,
+    },
 }
 
 #[tokio::main]
@@ -109,6 +124,13 @@ async fn main() -> Result<()> {
         }
         Commands::Backtest { file, strategy } => {
             run_backtest(file, strategy).await?;
+        }
+        Commands::Record {
+            symbol,
+            output,
+            duration,
+        } => {
+            run_record(symbol, output, duration).await?;
         }
     }
 
@@ -328,6 +350,82 @@ async fn run_replay(file: PathBuf, speed: f64) -> Result<()> {
     Ok(())
 }
 
+async fn run_record(symbol: String, output: PathBuf, duration_secs: u64) -> Result<()> {
+    info!(
+        symbol = %symbol,
+        output = %output.display(),
+        duration = duration_secs,
+        "Starting recorder"
+    );
+
+    let event_bus = Arc::new(EventBus::new(100_000));
+    let rx = event_bus.subscribe();
+
+    // Start Binance feed
+    let mut feed_manager = FeedManager::new(Arc::clone(&event_bus));
+    feed_manager
+        .subscribe(BinanceParser, vec![symbol.clone()])
+        .await?;
+
+    // Stop channel: send () to tell the recorder to finish
+    let (stop_tx, stop_rx): (
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    ) = crossbeam_channel::bounded(1);
+
+    // Spawn recorder task
+    let output_clone = output.clone();
+    let recorder_handle = tokio::task::spawn_blocking(move || {
+        let mut recorder = mercury_replay::Recorder::new(output_clone, 1000)?;
+        loop {
+            // Drain all queued events without blocking
+            match rx.try_recv() {
+                Ok(event) => recorder.record(event)?,
+                Err(crossbeam_channel::TryRecvError::Empty) => {
+                    // Check for stop signal
+                    if stop_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    // No events yet; brief yield before retrying
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+                Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+            }
+        }
+        // Drain any remaining events after stop
+        while let Ok(event) = rx.try_recv() {
+            recorder.record(event)?;
+        }
+        recorder.close()?;
+        Ok::<_, anyhow::Error>(())
+    });
+
+    // Run for duration or until Ctrl+C
+    if duration_secs > 0 {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(duration_secs)) => {
+                info!(seconds = duration_secs, "Recording duration reached");
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Interrupted");
+            }
+        }
+    } else {
+        tokio::signal::ctrl_c().await?;
+        info!("Interrupted");
+    }
+
+    feed_manager.shutdown().await;
+    let _ = stop_tx.send(());
+
+    if let Err(e) = recorder_handle.await? {
+        tracing::error!("Recorder error: {}", e);
+    }
+
+    info!(output = %output.display(), "Recording saved");
+    Ok(())
+}
+
 async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     info!(file = %file.display(), strategy = %strategy_name, "Starting backtest");
 
@@ -354,19 +452,13 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     let mut exchange = mercury_execution::SimulatedExchange::new(dec!(10000));
     let mut event_count = 0;
 
-    // Start replay in background
-    let play_bus = Arc::clone(&event_bus);
-    tokio::spawn(async move {
-        // Run replay (this will push events to bus)
-        if let Err(e) = mercury_replay::Player::new(file, 0.0).play(play_bus).await {
-            tracing::error!("Replay error: {}", e);
-        }
-    });
+    // Run replay synchronously — all events are queued before this returns
+    mercury_replay::Player::new(file, 0.0)
+        .play(Arc::clone(&event_bus))
+        .await?;
 
-    // Event loop
-    // We break when we assume replay is done (timeout or sentinel)
-    // For now simple timeout if no events for a while
-    while let Ok(event) = rx.recv() {
+    // Drain the queue with try_recv — no blocking, exits when empty
+    while let Ok(event) = rx.try_recv() {
         event_count += 1;
 
         // 1. Update Exchange & Check Fills
