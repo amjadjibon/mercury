@@ -43,17 +43,75 @@ pub enum EventPayload {
     Fill(Fill),
     /// Risk alert.
     RiskAlert(RiskAlert),
+    /// Periodic latency snapshot emitted by the strategy runner.
+    LatencyReport(LatencyReport),
 }
 
-/// Order book update event.
+/// Periodic latency snapshot emitted by the strategy runner.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatencyReport {
+    pub p50_ns: u64,
+    pub p99_ns: u64,
+    pub p999_ns: u64,
+    pub count: u64,
+}
+
+/// Maximum number of levels stored inline in a `BookUpdate`.
+pub const MAX_LEVELS: usize = 20;
+
+/// Order book update event — stack-allocated, no heap on the hot path.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookUpdate {
     pub exchange: Exchange,
     pub symbol: Symbol,
-    pub bids: Vec<Level>,
-    pub asks: Vec<Level>,
+    pub bids: [Level; MAX_LEVELS],
+    pub bid_count: u8,
+    pub asks: [Level; MAX_LEVELS],
+    pub ask_count: u8,
     pub sequence: u64,
     pub is_snapshot: bool,
+}
+
+impl BookUpdate {
+    /// Construct from slices, clamping to `MAX_LEVELS`.
+    pub fn from_slices(
+        exchange: Exchange,
+        symbol: Symbol,
+        bids: &[Level],
+        asks: &[Level],
+        sequence: u64,
+        is_snapshot: bool,
+    ) -> Self {
+        let zero = Level::new(Price::ZERO, Quantity::ZERO);
+        let mut bid_arr = [zero; MAX_LEVELS];
+        let bid_count = bids.len().min(MAX_LEVELS);
+        bid_arr[..bid_count].copy_from_slice(&bids[..bid_count]);
+
+        let mut ask_arr = [zero; MAX_LEVELS];
+        let ask_count = asks.len().min(MAX_LEVELS);
+        ask_arr[..ask_count].copy_from_slice(&asks[..ask_count]);
+
+        Self {
+            exchange,
+            symbol,
+            bids: bid_arr,
+            bid_count: bid_count as u8,
+            asks: ask_arr,
+            ask_count: ask_count as u8,
+            sequence,
+            is_snapshot,
+        }
+    }
+
+    /// Iterate valid bid levels.
+    pub fn bid_levels(&self) -> &[Level] {
+        &self.bids[..self.bid_count as usize]
+    }
+
+    /// Iterate valid ask levels.
+    pub fn ask_levels(&self) -> &[Level] {
+        &self.asks[..self.ask_count as usize]
+    }
 }
 
 /// Price level in the order book.
@@ -81,7 +139,32 @@ pub struct Trade {
     pub timestamp: Timestamp,
 }
 
-/// Trading signal from strategy.
+/// Strategy identifier — `u8` enum so Signal carries no heap allocation.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StrategyId {
+    MarketMaker = 0,
+    Momentum = 1,
+    Rsi = 2,
+    Arbitrage = 3,
+    Inference = 4,
+    Unknown = 255,
+}
+
+impl StrategyId {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::MarketMaker => "MarketMaker",
+            Self::Momentum => "Momentum",
+            Self::Rsi => "RSI",
+            Self::Arbitrage => "Arbitrage",
+            Self::Inference => "Inference",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
+/// Trading signal from strategy — fully stack-allocated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
     pub symbol: Symbol,
@@ -89,7 +172,7 @@ pub struct Signal {
     pub order_type: OrderType,
     pub price: Option<Price>,
     pub quantity: Quantity,
-    pub strategy: String,
+    pub strategy: StrategyId,
 }
 
 /// Order to be submitted.

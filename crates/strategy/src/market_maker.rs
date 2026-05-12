@@ -1,7 +1,7 @@
 //! Simple market making strategy.
 
 use crate::traits::Strategy;
-use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal};
+use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal, StrategyId};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -69,8 +69,8 @@ impl MarketMaker {
 }
 
 impl Strategy for MarketMaker {
-    fn name(&self) -> &'static str {
-        "MarketMaker"
+    fn id(&self) -> StrategyId {
+        StrategyId::MarketMaker
     }
 
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {
@@ -94,7 +94,7 @@ impl Strategy for MarketMaker {
                 order_type: OrderType::Limit,
                 price: Some(bid_price),
                 quantity: self.order_size,
-                strategy: self.name().to_string(),
+                strategy: self.id(),
             },
             Signal {
                 symbol: book.symbol,
@@ -102,7 +102,7 @@ impl Strategy for MarketMaker {
                 order_type: OrderType::Limit,
                 price: Some(ask_price),
                 quantity: self.order_size,
-                strategy: self.name().to_string(),
+                strategy: self.id(),
             },
         ]
     }
@@ -132,20 +132,20 @@ mod tests {
 
     fn sample_book() -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
-        book.apply_update(&BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![Level::new(dec!(50000), dec!(1.0))],
-            asks: vec![Level::new(dec!(50010), dec!(1.0))],
-            sequence: 1,
-            is_snapshot: true,
-        });
+        book.apply_update(&BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[Level::new(dec!(50000), dec!(1.0))],
+            &[Level::new(dec!(50010), dec!(1.0))],
+            1,
+            true,
+        ));
         book
     }
 
     #[test]
     fn test_market_maker_signals() {
-        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(1.0));
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(1.0)).with_quote_interval(1);
         let book = sample_book();
         let signals = mm.on_book(&book);
 

@@ -12,10 +12,20 @@ harness = false
 name = "orderbook"
 harness = false
 
+[[bench]]
+name = "strategy"
+harness = false
+
+[[bench]]
+name = "allocations"
+harness = false
+
 [dependencies]
 mercury-core = { path = "../core" }
+mercury-strategy = { path = "../strategy" }
 
 [dev-dependencies]
 criterion.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+stats_alloc.workspace = true

@@ -145,6 +145,7 @@ impl Player {
                 | (EventPayload::Order(_), "order")
                 | (EventPayload::Fill(_), "fill")
                 | (EventPayload::RiskAlert(_), "risk_alert")
+                | (EventPayload::LatencyReport(_), "latency_report")
         );
 
         if !type_matches {

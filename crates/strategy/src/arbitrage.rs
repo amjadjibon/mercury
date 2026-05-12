@@ -1,7 +1,7 @@
 //! Cross-exchange arbitrage strategy.
 
 use crate::traits::Strategy;
-use mercury_core::{Exchange, Fill, OrderBook, OrderType, Side, Signal, Symbol, Trade};
+use mercury_core::{Exchange, Fill, OrderBook, OrderType, Side, Signal, StrategyId, Symbol, Trade};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use tracing::info;
@@ -61,7 +61,7 @@ impl ArbitrageStrategy {
                         quantity: self.trade_quantity,
                         price: Some(*best_ask),
                         order_type: OrderType::Limit, // Should effectively be IOC
-                        strategy: self.name().to_string(),
+                        strategy: self.id(),
                     });
 
                     // Generate Sell Signal
@@ -71,7 +71,7 @@ impl ArbitrageStrategy {
                         quantity: self.trade_quantity,
                         price: Some(*best_bid),
                         order_type: OrderType::Limit,
-                        strategy: self.name().to_string(),
+                        strategy: self.id(),
                     });
 
                     // Note: This naive implementation would fire signals repeatedly.
@@ -86,8 +86,8 @@ impl ArbitrageStrategy {
 }
 
 impl Strategy for ArbitrageStrategy {
-    fn name(&self) -> &'static str {
-        "Cross-Exchange Arbitrage"
+    fn id(&self) -> StrategyId {
+        StrategyId::Arbitrage
     }
 
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {

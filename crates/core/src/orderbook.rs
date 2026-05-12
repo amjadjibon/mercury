@@ -37,7 +37,7 @@ impl OrderBook {
             self.asks.clear();
         }
 
-        for level in &update.bids {
+        for level in update.bid_levels() {
             if level.quantity == Decimal::ZERO {
                 self.bids.remove(&level.price);
             } else {
@@ -45,7 +45,7 @@ impl OrderBook {
             }
         }
 
-        for level in &update.asks {
+        for level in update.ask_levels() {
             if level.quantity == Decimal::ZERO {
                 self.asks.remove(&level.price);
             } else {
@@ -153,22 +153,22 @@ mod tests {
 
     fn sample_book() -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
-        let update = BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[
                 Level::new(dec!(50000), dec!(1.0)),
                 Level::new(dec!(49999), dec!(2.0)),
                 Level::new(dec!(49998), dec!(3.0)),
             ],
-            asks: vec![
+            &[
                 Level::new(dec!(50001), dec!(1.5)),
                 Level::new(dec!(50002), dec!(2.5)),
                 Level::new(dec!(50003), dec!(3.5)),
             ],
-            sequence: 1,
-            is_snapshot: true,
-        };
+            1,
+            true,
+        );
         book.apply_update(&update);
         book
     }
@@ -195,14 +195,14 @@ mod tests {
     #[test]
     fn test_delta_update() {
         let mut book = sample_book();
-        let update = BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![Level::new(dec!(50000), dec!(0))], // Remove level
-            asks: vec![Level::new(dec!(50001), dec!(5.0))], // Update level
-            sequence: 2,
-            is_snapshot: false,
-        };
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[Level::new(dec!(50000), dec!(0))],
+            &[Level::new(dec!(50001), dec!(5.0))],
+            2,
+            false,
+        );
         book.apply_update(&update);
 
         assert_eq!(book.best_bid().unwrap().price, dec!(49999));

@@ -148,14 +148,14 @@ impl YahooFeed {
 
         let timestamp = now_nanos();
 
-        let book_update = BookUpdate {
-            exchange: Exchange::Yahoo,
-            symbol: sym,
-            bids,
-            asks,
-            sequence: (timestamp / 1_000_000_000) as u64, // Convert ns to seconds for sequence
-            is_snapshot: true,
-        };
+        let book_update = BookUpdate::from_slices(
+            Exchange::Yahoo,
+            sym,
+            &bids,
+            &asks,
+            (timestamp / 1_000_000_000) as u64,
+            true,
+        );
 
         // Build trade if we have a current price
         let trade = if current_price > Decimal::ZERO {

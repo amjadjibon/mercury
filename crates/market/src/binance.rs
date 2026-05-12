@@ -75,14 +75,14 @@ impl BinanceParser {
             .filter_map(|l| self.parse_level(l))
             .collect();
 
-        let update = BookUpdate {
-            exchange: Exchange::Binance,
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
             symbol,
-            bids,
-            asks,
-            sequence: msg.final_update_id,
-            is_snapshot: false,
-        };
+            &bids,
+            &asks,
+            msg.final_update_id,
+            false,
+        );
 
         FeedMessage::DepthUpdate(update)
     }
@@ -201,8 +201,8 @@ mod tests {
         match result {
             FeedMessage::DepthUpdate(update) => {
                 assert_eq!(update.symbol.as_str(), "BTCUSDT");
-                assert_eq!(update.bids.len(), 2);
-                assert_eq!(update.asks.len(), 2);
+                assert_eq!(update.bid_levels().len(), 2);
+                assert_eq!(update.ask_levels().len(), 2);
                 assert_eq!(update.sequence, 105);
             }
             _ => panic!("Expected DepthUpdate"),
@@ -218,8 +218,8 @@ mod tests {
         match result {
             FeedMessage::DepthUpdate(update) => {
                 assert_eq!(update.symbol.as_str(), "BTCUSDT");
-                assert_eq!(update.bids.len(), 1);
-                assert_eq!(update.asks.len(), 1);
+                assert_eq!(update.bid_levels().len(), 1);
+                assert_eq!(update.ask_levels().len(), 1);
             }
             _ => panic!("Expected DepthUpdate"),
         }

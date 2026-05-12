@@ -128,14 +128,7 @@ impl CoinbaseParser {
             }
         }
 
-        BookUpdate {
-            exchange: Exchange::Coinbase,
-            symbol,
-            bids,
-            asks,
-            sequence: 0, // Coinbase doesn't send seq id in same way?
-            is_snapshot,
-        }
+        BookUpdate::from_slices(Exchange::Coinbase, symbol, &bids, &asks, 0, is_snapshot)
     }
 
     fn parse_trade(&self, trade: &CoinbaseTradeMsg) -> FeedMessage {

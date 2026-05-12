@@ -180,12 +180,13 @@ async fn run_trading(
 
     tokio::spawn(async move {
         loop {
-            match storage_rx.recv().await {
+            match storage_rx.recv_async().await {
                 Ok(event) => storage_clone.store_event(&event).await,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                Err(mercury_core::RecvError::Lagged(n)) => {
                     tracing::warn!(dropped = n, "Storage subscriber lagged");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Empty) => unreachable!(),
             }
         }
     });
@@ -201,12 +202,13 @@ async fn run_trading(
     let mut ipc_rx = event_bus.subscribe_all();
     tokio::spawn(async move {
         loop {
-            match ipc_rx.recv().await {
+            match ipc_rx.recv_async().await {
                 Ok(event) => ipc_clone.broadcast(event),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                Err(mercury_core::RecvError::Lagged(n)) => {
                     tracing::warn!(dropped = n, "IPC subscriber lagged");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Empty) => unreachable!(),
             }
         }
     });
@@ -285,7 +287,7 @@ async fn run_trading(
 
     tokio::spawn(async move {
         loop {
-            match signal_rx.recv().await {
+            match signal_rx.recv_async().await {
                 Ok(event) => {
                     if let mercury_core::EventPayload::Signal(signal) = event.payload {
                         if let Err(e) = om_clone.submit(signal).await {
@@ -293,10 +295,11 @@ async fn run_trading(
                         }
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                Err(mercury_core::RecvError::Lagged(n)) => {
                     tracing::warn!(dropped = n, "Signal subscriber lagged");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Closed) => break,
+                Err(mercury_core::RecvError::Empty) => unreachable!(),
             }
         }
     });
@@ -388,7 +391,7 @@ async fn run_record(symbol: String, output: PathBuf, duration_secs: u64) -> Resu
     );
 
     let event_bus = Arc::new(EventBus::new(100_000));
-    let rx = event_bus.subscribe();
+    let mut rx = event_bus.subscribe();
 
     // Start Binance feed
     let mut feed_manager = FeedManager::new(Arc::clone(&event_bus));
@@ -405,25 +408,28 @@ async fn run_record(symbol: String, output: PathBuf, duration_secs: u64) -> Resu
     // Spawn recorder task
     let output_clone = output.clone();
     let recorder_handle = tokio::task::spawn_blocking(move || {
+        use mercury_core::RecvError;
         let mut recorder = mercury_replay::Recorder::new(output_clone, 1000)?;
         loop {
-            // Drain all queued events without blocking
             match rx.try_recv() {
                 Ok(event) => recorder.record(event)?,
-                Err(crossbeam_channel::TryRecvError::Empty) => {
-                    // Check for stop signal
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Empty) => {
                     if stop_rx.try_recv().is_ok() {
                         break;
                     }
-                    // No events yet; brief yield before retrying
                     std::thread::sleep(std::time::Duration::from_millis(1));
                 }
-                Err(crossbeam_channel::TryRecvError::Disconnected) => break,
+                Err(RecvError::Closed) => break,
             }
         }
         // Drain any remaining events after stop
-        while let Ok(event) = rx.try_recv() {
-            recorder.record(event)?;
+        loop {
+            match rx.try_recv() {
+                Ok(event) => recorder.record(event)?,
+                Err(RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            }
         }
         recorder.close()?;
         Ok::<_, anyhow::Error>(())
@@ -477,7 +483,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     }
 
     // Subscribe to events
-    let rx = event_bus.subscribe();
+    let mut rx = event_bus.subscribe();
     let mut exchange = mercury_execution::SimulatedExchange::new(dec!(10000));
     let mut event_count = 0;
 
@@ -486,7 +492,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
         .play(Arc::clone(&event_bus))
         .await?;
 
-    // Drain the queue with try_recv — no blocking, exits when empty
+    // Drain the queue with try_recv — exits when empty or closed
     while let Ok(event) = rx.try_recv() {
         event_count += 1;
 

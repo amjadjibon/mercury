@@ -1,13 +1,18 @@
 //! Strategy trait definition.
 
-use mercury_core::{Fill, OrderBook, Signal, Trade};
+use mercury_core::{Fill, OrderBook, Signal, StrategyId, Trade};
 
 /// Trait for trading strategies.
 ///
 /// Implement this trait to create custom trading strategies.
 pub trait Strategy: Send + Sync {
-    /// Get the strategy name.
-    fn name(&self) -> &'static str;
+    /// Get the strategy identifier (used in Signal payloads — zero allocation).
+    fn id(&self) -> StrategyId;
+
+    /// Get the strategy name for display/logging.
+    fn name(&self) -> &'static str {
+        self.id().as_str()
+    }
 
     /// Called when the order book is updated.
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal>;

@@ -14,14 +14,14 @@ fn create_update(sequence: u64, num_levels: usize) -> BookUpdate {
         .map(|i| Level::new(dec!(50001) + Decimal::from(i), dec!(1.0)))
         .collect();
 
-    BookUpdate {
-        exchange: Exchange::Binance,
-        symbol: Symbol::new("BTCUSDT"),
-        bids,
-        asks,
+    BookUpdate::from_slices(
+        Exchange::Binance,
+        Symbol::new("BTCUSDT"),
+        &bids,
+        &asks,
         sequence,
-        is_snapshot: false,
-    }
+        false,
+    )
 }
 
 fn bench_apply_update(c: &mut Criterion) {
@@ -30,19 +30,21 @@ fn bench_apply_update(c: &mut Criterion) {
 
     let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
 
-    // Initialize with snapshot
-    let snapshot = BookUpdate {
-        exchange: Exchange::Binance,
-        symbol: Symbol::new("BTCUSDT"),
-        bids: (0..100)
-            .map(|i| Level::new(dec!(50000) - Decimal::from(i), dec!(1.0)))
-            .collect(),
-        asks: (0..100)
-            .map(|i| Level::new(dec!(50001) + Decimal::from(i), dec!(1.0)))
-            .collect(),
-        sequence: 0,
-        is_snapshot: true,
-    };
+    // Initialize with snapshot (clamped to MAX_LEVELS=20)
+    let bids: Vec<Level> = (0..20)
+        .map(|i| Level::new(dec!(50000) - Decimal::from(i), dec!(1.0)))
+        .collect();
+    let asks: Vec<Level> = (0..20)
+        .map(|i| Level::new(dec!(50001) + Decimal::from(i), dec!(1.0)))
+        .collect();
+    let snapshot = BookUpdate::from_slices(
+        Exchange::Binance,
+        Symbol::new("BTCUSDT"),
+        &bids,
+        &asks,
+        0,
+        true,
+    );
     book.apply_update(&snapshot);
 
     group.bench_function("apply_10_levels", |b| {
@@ -62,18 +64,21 @@ fn bench_best_bid_ask(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
-    let snapshot = BookUpdate {
-        exchange: Exchange::Binance,
-        symbol: Symbol::new("BTCUSDT"),
-        bids: (0..1000)
-            .map(|i| Level::new(dec!(50000) - Decimal::from(i), dec!(1.0)))
-            .collect(),
-        asks: (0..1000)
-            .map(|i| Level::new(dec!(50001) + Decimal::from(i), dec!(1.0)))
-            .collect(),
-        sequence: 0,
-        is_snapshot: true,
-    };
+    // Seed book with 20 levels (MAX_LEVELS)
+    let bids: Vec<Level> = (0..20)
+        .map(|i| Level::new(dec!(50000) - Decimal::from(i), dec!(1.0)))
+        .collect();
+    let asks: Vec<Level> = (0..20)
+        .map(|i| Level::new(dec!(50001) + Decimal::from(i), dec!(1.0)))
+        .collect();
+    let snapshot = BookUpdate::from_slices(
+        Exchange::Binance,
+        Symbol::new("BTCUSDT"),
+        &bids,
+        &asks,
+        0,
+        true,
+    );
     book.apply_update(&snapshot);
 
     group.bench_function("best_bid", |b| b.iter(|| black_box(book.best_bid())));

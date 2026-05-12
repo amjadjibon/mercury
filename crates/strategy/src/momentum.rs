@@ -1,7 +1,7 @@
 //! Momentum strategy.
 
 use crate::traits::Strategy;
-use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal, Trade};
+use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal, StrategyId, Trade};
 use rust_decimal::Decimal;
 use std::collections::VecDeque;
 
@@ -54,8 +54,8 @@ impl Momentum {
 }
 
 impl Strategy for Momentum {
-    fn name(&self) -> &'static str {
-        "Momentum"
+    fn id(&self) -> StrategyId {
+        StrategyId::Momentum
     }
 
     fn on_book(&mut self, _book: &OrderBook) -> Vec<Signal> {
@@ -81,7 +81,7 @@ impl Strategy for Momentum {
                 order_type: OrderType::Market,
                 price: None,
                 quantity: self.order_size,
-                strategy: self.name().to_string(),
+                strategy: self.id(),
             }];
         } else if momentum < -self.threshold && self.position >= Decimal::ZERO {
             // Strong sell momentum, go short
@@ -91,7 +91,7 @@ impl Strategy for Momentum {
                 order_type: OrderType::Market,
                 price: None,
                 quantity: self.order_size,
-                strategy: self.name().to_string(),
+                strategy: self.id(),
             }];
         }
 

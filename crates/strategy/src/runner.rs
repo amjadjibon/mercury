@@ -2,6 +2,7 @@
 
 use crate::traits::Strategy;
 use mercury_core::{Event, EventBus, EventPayload, OrderBook, Signal};
+use mercury_metrics::LatencyTracker;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -11,6 +12,7 @@ pub struct StrategyRunner {
     strategies: Vec<Box<dyn Strategy>>,
     books: HashMap<mercury_core::Symbol, OrderBook>,
     event_bus: Arc<EventBus>,
+    latency: Arc<LatencyTracker>,
 }
 
 impl StrategyRunner {
@@ -20,7 +22,13 @@ impl StrategyRunner {
             strategies: Vec::new(),
             books: HashMap::new(),
             event_bus,
+            latency: Arc::new(LatencyTracker::new()),
         }
+    }
+
+    /// Get a reference to the latency tracker.
+    pub fn latency_tracker(&self) -> Arc<LatencyTracker> {
+        Arc::clone(&self.latency)
     }
 
     /// Add a strategy to the runner.
@@ -82,9 +90,9 @@ impl StrategyRunner {
 
     /// Run the strategy runner in a loop (blocking, for backtest use).
     pub fn run(&mut self) {
-        let receiver = self.event_bus.subscribe();
+        let mut receiver = self.event_bus.subscribe();
 
-        while let Ok(event) = receiver.recv() {
+        while let Some(event) = receiver.recv() {
             let signals = self.process(&event);
             if !signals.is_empty() {
                 self.publish_signals(signals);
@@ -97,19 +105,37 @@ impl StrategyRunner {
     /// Uses the broadcast fan-out channel so the task has proper await points
     /// and can be cancelled cleanly when the tokio runtime shuts down.
     pub async fn run_async(&mut self) {
+        use mercury_core::RecvError;
         let mut receiver = self.event_bus.subscribe_all();
         loop {
-            match receiver.recv().await {
+            match receiver.recv_async().await {
                 Ok(event) => {
+                    let t0 = mercury_core::types::now_nanos();
                     let signals = self.process(&event);
                     if !signals.is_empty() {
                         self.publish_signals(signals);
                     }
+                    self.latency.record((mercury_core::types::now_nanos() - t0) as u64);
+
+                    let count = self.latency.count();
+                    if count % 1000 == 0 && count > 0 {
+                        let report = mercury_core::Event::new(
+                            self.event_bus.next_id(),
+                            mercury_core::EventPayload::LatencyReport(mercury_core::LatencyReport {
+                                p50_ns: self.latency.p50(),
+                                p99_ns: self.latency.p99(),
+                                p999_ns: self.latency.p999(),
+                                count,
+                            }),
+                        );
+                        let _ = self.event_bus.try_publish(report);
+                    }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(dropped = n, "Strategy runner lagged — consider reducing quote frequency");
+                Err(RecvError::Lagged(n)) => {
+                    warn!(dropped = n, "Strategy runner lagged");
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(RecvError::Closed) => break,
+                Err(RecvError::Empty) => unreachable!(),
             }
         }
     }

@@ -1,183 +1,190 @@
-//! Lock-free event bus using crossbeam channels.
+//! Event bus backed by a lock-free ring buffer.
 
 use crate::events::Event;
-use crossbeam_channel::{Receiver, Sender, TrySendError, bounded};
+use crate::ring_buffer::{RingBuffer, Subscriber};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
-use tokio::sync::broadcast;
 
-/// Event bus errors.
+pub use crate::ring_buffer::RecvError as EventBusError;
+
+/// Publish-side error.
 #[derive(Debug, Error)]
-pub enum EventBusError {
-    #[error("Event bus is full")]
-    Full,
-    #[error("Event bus is disconnected")]
-    Disconnected,
+pub enum PublishError {
+    #[error("Event bus is closed")]
+    Closed,
 }
 
-impl<T> From<TrySendError<T>> for EventBusError {
-    fn from(err: TrySendError<T>) -> Self {
-        match err {
-            TrySendError::Full(_) => EventBusError::Full,
-            TrySendError::Disconnected(_) => EventBusError::Disconnected,
-        }
-    }
-}
-
-/// Lock-free event bus for high-throughput message passing.
+/// Lock-free event bus.
 ///
-/// Crossbeam bounded channel serves the hot-path single consumer (StrategyRunner).
-/// Tokio broadcast channel fans out to all observers (IPC, Storage, etc.) so every
-/// subscriber receives every event without competing.
+/// All inter-component communication flows through a single pre-allocated ring
+/// buffer. Every `Subscriber` tracks its own read cursor — events are written
+/// once by the publisher and read independently by each subscriber (fan-out,
+/// no per-subscriber copies on the publisher side).
+///
+/// Use `subscribe()` for both hot-path blocking consumers (strategy runner)
+/// and async fan-out consumers (storage, IPC, signal handler). The returned
+/// `Subscriber<Event>` supports `recv()` (blocking spin), `try_recv()`
+/// (non-blocking), and `recv_async()` (async, Notify-based).
 #[derive(Clone)]
 pub struct EventBus {
-    sender: Sender<Event>,
-    receiver: Receiver<Event>,
-    broadcast_tx: broadcast::Sender<Event>,
-    next_id: std::sync::Arc<AtomicU64>,
+    ring: RingBuffer<Event>,
+    next_id: Arc<AtomicU64>,
 }
 
 impl EventBus {
     pub fn new(capacity: usize) -> Self {
-        let (sender, receiver) = bounded(capacity);
-        let (broadcast_tx, _) = broadcast::channel(capacity.min(65536));
         Self {
-            sender,
-            receiver,
-            broadcast_tx,
-            next_id: std::sync::Arc::new(AtomicU64::new(1)),
+            ring: RingBuffer::new(capacity),
+            next_id: Arc::new(AtomicU64::new(1)),
         }
     }
 
-    /// Get the next event ID.
+    /// Allocate the next monotonic event ID.
     pub fn next_id(&self) -> u64 {
         self.next_id.fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Publish an event to the bus.
-    ///
-    /// Sends to both the hot-path crossbeam channel and the broadcast fan-out.
-    /// Returns immediately if the crossbeam channel is full (non-blocking).
-    pub fn try_publish(&self, event: Event) -> Result<(), EventBusError> {
-        let _ = self.broadcast_tx.send(event.clone());
-        self.sender.try_send(event)?;
+    /// Create a subscriber whose cursor starts at the current head.
+    /// All subscribers receive all events independently (fan-out semantics).
+    pub fn subscribe(&self) -> Subscriber<Event> {
+        self.ring.subscribe()
+    }
+
+    /// Alias for `subscribe()` — provided for backward compatibility with
+    /// callers that previously used the tokio broadcast fan-out channel.
+    pub fn subscribe_all(&self) -> Subscriber<Event> {
+        self.ring.subscribe()
+    }
+
+    /// Publish an event. Non-blocking; always succeeds unless the bus is closed.
+    pub fn try_publish(&self, event: Event) -> Result<(), PublishError> {
+        self.ring.publish(event);
         Ok(())
     }
 
-    /// Publish an event, blocking if the crossbeam channel is full.
-    pub fn publish(&self, event: Event) -> Result<(), EventBusError> {
-        let _ = self.broadcast_tx.send(event.clone());
-        self.sender
-            .send(event)
-            .map_err(|_| EventBusError::Disconnected)
+    /// Publish an event (same as `try_publish` — ring buffer never blocks).
+    pub fn publish(&self, event: Event) -> Result<(), PublishError> {
+        self.ring.publish(event);
+        Ok(())
     }
 
-    /// Subscribe via crossbeam (MPMC work-stealing). Use only for the single
-    /// primary hot-path consumer (StrategyRunner). Each event goes to one receiver.
-    pub fn subscribe(&self) -> Receiver<Event> {
-        self.receiver.clone()
+    /// Signal shutdown. Async subscribers waiting on `recv_async` will return
+    /// `RecvError::Closed` after draining any remaining events.
+    pub fn close(&self) {
+        self.ring.close();
     }
 
-    /// Subscribe to all events via tokio broadcast fan-out. Every subscriber
-    /// receives every event independently. Use for IPC, storage, signal handlers.
-    pub fn subscribe_all(&self) -> broadcast::Receiver<Event> {
-        self.broadcast_tx.subscribe()
+    pub fn capacity(&self) -> Option<usize> {
+        Some(self.ring.capacity())
     }
 
-    /// Try to receive an event without blocking.
-    pub fn try_recv(&self) -> Option<Event> {
-        self.receiver.try_recv().ok()
-    }
-
-    /// Receive an event, blocking until one is available.
-    pub fn recv(&self) -> Option<Event> {
-        self.receiver.recv().ok()
-    }
-
-    /// Get the number of events currently in the bus.
+    /// Approximate number of events published (monotonically increasing).
     pub fn len(&self) -> usize {
-        self.sender.len()
+        self.ring.inner.publisher_seq.load(Ordering::Relaxed) as usize
     }
 
-    /// Check if the bus is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
-    /// Get the capacity of the bus.
-    pub fn capacity(&self) -> Option<usize> {
-        self.sender.capacity()
-    }
-
-    /// Check if the bus is full.
     pub fn is_full(&self) -> bool {
-        self.sender.is_full()
+        false
     }
 }
 
 impl Default for EventBus {
     fn default() -> Self {
-        Self::new(100_000)
+        Self::new(65_536)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::BookUpdate;
-    use crate::events::EventPayload;
+    use crate::events::{BookUpdate, EventPayload};
+    use crate::ring_buffer::RecvError;
     use crate::types::{Exchange, Symbol};
 
     #[test]
     fn test_publish_subscribe() {
-        let bus = EventBus::new(100);
-        let receiver = bus.subscribe();
+        let bus = EventBus::new(128);
+        let mut rx = bus.subscribe();
 
         let event = Event::new(
             bus.next_id(),
-            EventPayload::BookUpdate(BookUpdate {
-                exchange: Exchange::Binance,
-                symbol: Symbol::new("BTCUSDT"),
-                bids: vec![],
-                asks: vec![],
-                sequence: 1,
-                is_snapshot: true,
-            }),
+            EventPayload::BookUpdate(BookUpdate::from_slices(
+                Exchange::Binance,
+                Symbol::new("BTCUSDT"),
+                &[],
+                &[],
+                1,
+                true,
+            )),
         );
 
         bus.publish(event.clone()).unwrap();
-        let received = receiver.recv().unwrap();
+        let received = rx.recv().unwrap();
         assert_eq!(received.id, event.id);
     }
 
     #[test]
-    fn test_try_publish_full() {
-        let bus = EventBus::new(1);
+    fn test_fanout_multiple_subscribers() {
+        let bus = EventBus::new(128);
+        let mut rx1 = bus.subscribe();
+        let mut rx2 = bus.subscribe();
 
         let event = Event::new(
-            1,
-            EventPayload::BookUpdate(BookUpdate {
-                exchange: Exchange::Binance,
-                symbol: Symbol::new("BTCUSDT"),
-                bids: vec![],
-                asks: vec![],
-                sequence: 1,
-                is_snapshot: true,
-            }),
+            bus.next_id(),
+            EventPayload::BookUpdate(BookUpdate::from_slices(
+                Exchange::Binance,
+                Symbol::new("BTCUSDT"),
+                &[],
+                &[],
+                1,
+                true,
+            )),
         );
 
-        bus.try_publish(event.clone()).unwrap();
-        let result = bus.try_publish(event);
-        assert!(matches!(result, Err(EventBusError::Full)));
+        bus.publish(event.clone()).unwrap();
+
+        let r1 = rx1.recv().unwrap();
+        let r2 = rx2.recv().unwrap();
+        assert_eq!(r1.id, event.id);
+        assert_eq!(r2.id, event.id);
     }
 
     #[test]
-    fn test_multiple_subscribers() {
-        let bus = EventBus::new(100);
-        let _rx1 = bus.subscribe();
-        let _rx2 = bus.subscribe();
+    fn test_lagged_subscriber() {
+        let bus = EventBus::new(4); // tiny capacity: 4 slots (next power of 2)
 
-        // All subscribers share the same receiver
-        // (crossbeam bounded channel is MPMC)
+        // Subscriber created AFTER publishing — starts at current head, not 0.
+        // So we must create subscriber first, then publish past capacity.
+        let mut rx = bus.subscribe();
+
+        let make = |id| {
+            Event::new(
+                id,
+                EventPayload::BookUpdate(BookUpdate::from_slices(
+                    Exchange::Binance,
+                    Symbol::new("BTCUSDT"),
+                    &[],
+                    &[],
+                    id,
+                    false,
+                )),
+            )
+        };
+
+        // Publish 8 events (2× capacity of 4), causing rx to lag.
+        for i in 0..8 {
+            bus.publish(make(i)).unwrap();
+        }
+
+        // First try_recv should return Lagged.
+        match rx.try_recv() {
+            Err(RecvError::Lagged(_)) => {}
+            other => panic!("expected Lagged, got {other:?}"),
+        }
     }
 }

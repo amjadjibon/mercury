@@ -68,3 +68,4 @@ async-trait = "0.1"
 
 # Testing
 criterion = { version = "0.5", features = ["html_reports"] }
+stats_alloc = "0.1"

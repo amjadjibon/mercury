@@ -70,7 +70,7 @@ mod tests {
             order_type: OrderType::Limit,
             price: Some(dec!(50000)),
             quantity: dec!(0.5),
-            strategy: "test".to_string(),
+            strategy: mercury_core::StrategyId::Unknown,
         };
 
         assert!(check_position_limit(dec!(0.6), &signal, dec!(1.0)).is_err());
@@ -85,7 +85,7 @@ mod tests {
             order_type: OrderType::Limit,
             price: Some(dec!(50000)),
             quantity: dec!(0.5),
-            strategy: "test".to_string(),
+            strategy: mercury_core::StrategyId::Unknown,
         };
 
         assert!(check_position_limit(dec!(-0.6), &signal, dec!(1.0)).is_err());

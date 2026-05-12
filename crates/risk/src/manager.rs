@@ -202,7 +202,7 @@ mod tests {
             order_type: OrderType::Limit,
             price: Some(dec!(50000)),
             quantity: dec!(0.2),
-            strategy: "test".to_string(),
+            strategy: mercury_core::StrategyId::Unknown,
         };
 
         let result = manager.check(&signal);
@@ -220,7 +220,7 @@ mod tests {
             order_type: OrderType::Market,
             price: None,
             quantity: dec!(0.1),
-            strategy: "test".to_string(),
+            strategy: mercury_core::StrategyId::Unknown,
         };
 
         let result = manager.check(&signal);

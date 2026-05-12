@@ -43,8 +43,8 @@ impl PaperGateway {
         let bridge_bus = Arc::clone(&event_bus);
 
         std::thread::spawn(move || {
-            let rx = bridge_bus.subscribe();
-            while let Ok(event) = rx.recv() {
+            let mut rx = bridge_bus.subscribe();
+            while let Some(event) = rx.recv() {
                 if event_tx.send(event).is_err() {
                     break;
                 }

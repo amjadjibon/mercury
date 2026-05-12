@@ -150,6 +150,7 @@ impl EventExt for Event {
             EventPayload::Order(_) => "order".to_string(),
             EventPayload::Fill(_) => "fill".to_string(),
             EventPayload::RiskAlert(_) => "risk_alert".to_string(),
+            EventPayload::LatencyReport(_) => "latency_report".to_string(),
         }
     }
 
@@ -161,6 +162,7 @@ impl EventExt for Event {
             EventPayload::Order(o) => Some(o.symbol.as_str().to_string()),
             EventPayload::Fill(f) => Some(f.symbol.as_str().to_string()),
             EventPayload::RiskAlert(_) => None,
+            EventPayload::LatencyReport(_) => None,
         }
     }
 
@@ -186,14 +188,14 @@ mod tests {
         let event = Event {
             id: 1,
             timestamp: 1234567890,
-            payload: EventPayload::BookUpdate(BookUpdate {
-                exchange: Exchange::Binance,
-                symbol: Symbol::new("BTCUSDT"),
-                bids: vec![Level::new(dec!(50000), dec!(1.0))],
-                asks: vec![Level::new(dec!(50001), dec!(1.0))],
-                sequence: 1,
-                is_snapshot: false,
-            }),
+            payload: EventPayload::BookUpdate(BookUpdate::from_slices(
+                Exchange::Binance,
+                Symbol::new("BTCUSDT"),
+                &[Level::new(dec!(50000), dec!(1.0))],
+                &[Level::new(dec!(50001), dec!(1.0))],
+                1,
+                false,
+            )),
         };
 
         recorder.record(event).unwrap();

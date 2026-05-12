@@ -4,7 +4,7 @@
 
 use crate::indicators::{Rsi, Window};
 use crate::traits::Strategy;
-use mercury_core::{OrderType, Side, Signal, Symbol, Trade};
+use mercury_core::{OrderType, Side, Signal, StrategyId, Symbol, Trade};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tracing::info;
@@ -37,8 +37,8 @@ impl RsiStrategy {
 }
 
 impl Strategy for RsiStrategy {
-    fn name(&self) -> &'static str {
-        "RSI Mean Reversion"
+    fn id(&self) -> StrategyId {
+        StrategyId::Rsi
     }
 
     fn on_book(&mut self, _book: &mercury_core::OrderBook) -> Vec<Signal> {
@@ -66,7 +66,7 @@ impl Strategy for RsiStrategy {
                     order_type: OrderType::Market,
                     price: None,
                     quantity: self.quantity,
-                    strategy: self.name().to_string(),
+                    strategy: self.id(),
                 }];
             }
 
@@ -80,7 +80,7 @@ impl Strategy for RsiStrategy {
                     order_type: OrderType::Market,
                     price: None,
                     quantity: self.quantity,
-                    strategy: self.name().to_string(),
+                    strategy: self.id(),
                 }];
             }
         }

@@ -7,14 +7,14 @@ use rust_decimal_macros::dec;
 fn create_event(id: u64) -> Event {
     Event::new(
         id,
-        EventPayload::BookUpdate(BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![Level::new(dec!(50000), dec!(1.0))],
-            asks: vec![Level::new(dec!(50001), dec!(1.0))],
-            sequence: id,
-            is_snapshot: false,
-        }),
+        EventPayload::BookUpdate(BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[Level::new(dec!(50000), dec!(1.0))],
+            &[Level::new(dec!(50001), dec!(1.0))],
+            id,
+            false,
+        )),
     )
 }
 
@@ -23,10 +23,10 @@ fn bench_publish(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let bus = EventBus::new(1_000_000);
-    let rx = bus.subscribe();
+    let mut rx = bus.subscribe();
 
-    // Drain the channel in background to prevent full buffer
-    std::thread::spawn(move || while rx.recv().is_ok() {});
+    // Drain in background to prevent the ring buffer from lapping.
+    std::thread::spawn(move || while rx.recv().is_some() {});
 
     group.bench_function("publish", |b| {
         let mut id = 0u64;
@@ -45,7 +45,7 @@ fn bench_roundtrip(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1));
 
     let bus = EventBus::new(1_000_000);
-    let rx = bus.subscribe();
+    let mut rx = bus.subscribe();
 
     group.bench_function("roundtrip", |b| {
         let mut id = 0u64;

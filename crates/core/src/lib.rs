@@ -11,9 +11,11 @@ pub mod events;
 pub mod ipc;
 pub mod orderbook;
 pub mod pool;
+pub mod ring_buffer;
 pub mod types;
 
-pub use event_bus::EventBus;
+pub use event_bus::{EventBus, PublishError};
+pub use ring_buffer::{RecvError, Subscriber};
 pub use events::*;
 pub use ipc::IpcServer;
 pub use orderbook::OrderBook;

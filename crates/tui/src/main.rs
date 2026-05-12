@@ -59,6 +59,8 @@ struct App {
     fills: Vec<FillEntry>,
     kill_switch: bool,
     start_time: std::time::Instant,
+    latency_p50: u64,
+    latency_p99: u64,
 }
 
 impl App {
@@ -76,6 +78,8 @@ impl App {
             fills: Vec::new(),
             kill_switch: false,
             start_time: std::time::Instant::now(),
+            latency_p50: 0,
+            latency_p99: 0,
         }
     }
 
@@ -195,6 +199,10 @@ fn run_app(
                     if let Some(p) = trade.price.to_f64() {
                         app.on_price(p);
                     }
+                }
+                mercury_core::EventPayload::LatencyReport(report) => {
+                    app.latency_p50 = report.p50_ns;
+                    app.latency_p99 = report.p99_ns;
                 }
                 _ => {}
             }
@@ -389,6 +397,11 @@ fn ui(f: &mut Frame, app: &App) {
             Span::styled(
                 if app.kill_switch { "HALTED" } else if app.price_history.is_empty() { "Connecting..." } else { "Active" },
                 Style::default().fg(if app.kill_switch { Color::Red } else if app.price_history.is_empty() { Color::Yellow } else { Color::Green }),
+            ),
+            Span::raw("   Latency p50/p99 : "),
+            Span::styled(
+                format!("{}/{}μs", app.latency_p50 / 1000, app.latency_p99 / 1000),
+                Style::default().fg(Color::Cyan),
             ),
         ]),
     ])

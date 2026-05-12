@@ -103,14 +103,14 @@ mod tests {
     #[test]
     fn test_apply_snapshot() {
         let mut builder = BookBuilder::new();
-        let update = BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![Level::new(dec!(50000), dec!(1.0))],
-            asks: vec![Level::new(dec!(50001), dec!(1.0))],
-            sequence: 100,
-            is_snapshot: true,
-        };
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[Level::new(dec!(50000), dec!(1.0))],
+            &[Level::new(dec!(50001), dec!(1.0))],
+            100,
+            true,
+        );
 
         assert!(builder.apply(&update));
 
@@ -124,26 +124,24 @@ mod tests {
     fn test_sequence_gap_detection() {
         let mut builder = BookBuilder::new();
 
-        // Apply initial snapshot
-        let snapshot = BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![],
-            asks: vec![],
-            sequence: 100,
-            is_snapshot: true,
-        };
+        let snapshot = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[],
+            &[],
+            100,
+            true,
+        );
         builder.apply(&snapshot);
 
-        // Apply update with gap
-        let update = BookUpdate {
-            exchange: Exchange::Binance,
-            symbol: Symbol::new("BTCUSDT"),
-            bids: vec![],
-            asks: vec![],
-            sequence: 102, // Gap: expected 101
-            is_snapshot: false,
-        };
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[],
+            &[],
+            102, // Gap: expected 101
+            false,
+        );
 
         assert!(!builder.apply(&update));
     }
