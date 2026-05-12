@@ -8,4 +8,5 @@ license.workspace = true
 mercury-core = { path = "../core" }
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+tokio.workspace = true
 tracing.workspace = true

@@ -2490,6 +2490,7 @@ dependencies = [
  "mercury-core",
  "rust_decimal",
  "rust_decimal_macros",
+ "tokio",
  "tracing",
 ]
 

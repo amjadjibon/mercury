@@ -4,7 +4,7 @@ use crate::traits::Strategy;
 use mercury_core::{Event, EventBus, EventPayload, OrderBook, Signal};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Runs strategies and generates signals.
 pub struct StrategyRunner {
@@ -80,7 +80,7 @@ impl StrategyRunner {
         }
     }
 
-    /// Run the strategy runner in a loop.
+    /// Run the strategy runner in a loop (blocking, for backtest use).
     pub fn run(&mut self) {
         let receiver = self.event_bus.subscribe();
 
@@ -88,6 +88,28 @@ impl StrategyRunner {
             let signals = self.process(&event);
             if !signals.is_empty() {
                 self.publish_signals(signals);
+            }
+        }
+    }
+
+    /// Run the strategy runner as an async task (for live trading).
+    ///
+    /// Uses the broadcast fan-out channel so the task has proper await points
+    /// and can be cancelled cleanly when the tokio runtime shuts down.
+    pub async fn run_async(&mut self) {
+        let mut receiver = self.event_bus.subscribe_all();
+        loop {
+            match receiver.recv().await {
+                Ok(event) => {
+                    let signals = self.process(&event);
+                    if !signals.is_empty() {
+                        self.publish_signals(signals);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!(dropped = n, "Strategy runner lagged — consider reducing quote frequency");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
     }

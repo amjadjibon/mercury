@@ -351,9 +351,9 @@ async fn run_trading(
 
     info!("Mercury is running. Press Ctrl+C to stop.");
 
-    // Run strategy in background
+    // Run strategy in background (async so it cancels cleanly on shutdown)
     tokio::spawn(async move {
-        strategy_runner.run();
+        strategy_runner.run_async().await;
     });
 
     // Wait for shutdown
