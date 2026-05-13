@@ -6,7 +6,7 @@ use mercury_core::{Event, EventBus, EventPayload};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{MaybeTlsStream, connect_async_tls_with_config, tungstenite::Message};
+use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use tracing::{error, info, warn};
 
 /// Feed manager errors.
@@ -161,10 +161,11 @@ impl FeedManager {
 /// No-op (with a warning) if the setsockopt call fails.
 #[cfg(target_os = "linux")]
 fn set_busy_poll(
-    ws: &tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     busy_poll_us: u32,
 ) {
     use std::os::unix::io::AsRawFd;
+    use tokio_tungstenite::MaybeTlsStream;
 
     let fd = match ws.get_ref() {
         MaybeTlsStream::Plain(tcp) => tcp.as_raw_fd(),
