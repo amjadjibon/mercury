@@ -6,7 +6,7 @@ use mercury_core::{Event, EventBus, EventPayload};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tokio_tungstenite::{MaybeTlsStream, connect_async_tls_with_config, tungstenite::Message};
 use tracing::{error, info, warn};
 
 /// Feed manager errors.
@@ -44,9 +44,14 @@ impl FeedManager {
         let url = parser.ws_url(&symbols);
         info!(exchange = %parser.exchange(), ?symbols, "Connecting to feed");
 
-        let (ws_stream, _) = connect_async(&url)
+        // TCP_NODELAY: disable Nagle's algorithm for minimum wire latency.
+        let (ws_stream, _) = connect_async_tls_with_config(&url, None, true, None)
             .await
             .map_err(|e| FeedError::ConnectionFailed(e.to_string()))?;
+
+        // SO_BUSY_POLL: poll NIC from userspace instead of waiting for interrupt (Linux only).
+        #[cfg(target_os = "linux")]
+        set_busy_poll(&ws_stream, 50);
 
         let (mut write, mut read) = ws_stream.split();
 
@@ -145,5 +150,48 @@ impl FeedManager {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
         }
+    }
+}
+
+/// Set `SO_BUSY_POLL` on the underlying TCP socket.
+///
+/// Instructs the kernel to spin-poll the NIC receive queue for up to
+/// `busy_poll_us` microseconds before yielding to the interrupt path.
+/// Requires `net.core.busy_poll` sysctl and a NIC driver that supports NAPI.
+/// No-op (with a warning) if the setsockopt call fails.
+#[cfg(target_os = "linux")]
+fn set_busy_poll(
+    ws: &tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    busy_poll_us: u32,
+) {
+    use std::os::unix::io::AsRawFd;
+
+    let fd = match ws.get_ref() {
+        MaybeTlsStream::Plain(tcp) => tcp.as_raw_fd(),
+        MaybeTlsStream::NativeTls(tls) => tls.get_ref().get_ref().as_raw_fd(),
+        _ => {
+            warn!("SO_BUSY_POLL: unrecognised TLS variant, skipping");
+            return;
+        }
+    };
+
+    let val = busy_poll_us as libc::c_int;
+    let ret = unsafe {
+        libc::setsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_BUSY_POLL,
+            &val as *const _ as *const libc::c_void,
+            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+        )
+    };
+    if ret != 0 {
+        warn!(
+            busy_poll_us,
+            err = %std::io::Error::last_os_error(),
+            "SO_BUSY_POLL setsockopt failed"
+        );
+    } else {
+        info!(busy_poll_us, "SO_BUSY_POLL set on feed socket");
     }
 }

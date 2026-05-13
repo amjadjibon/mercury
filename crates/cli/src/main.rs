@@ -1,10 +1,12 @@
 //! Mercury CLI - Command-line interface for the trading engine.
 
-use anyhow::Result;
+mod config;
+
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mercury_core::EventBus;
-use mercury_gateway::{BinanceConfig, BinanceGateway, ExchangeGateway};
-use mercury_market::{BinanceParser, FeedManager};
+use mercury_gateway::{BinanceConfig, BinanceGateway, CoinbaseConfig, CoinbaseGateway, ExchangeGateway};
+use mercury_market::{BinanceParser, CoinbaseParser, FeedManager};
 use mercury_risk::{RiskConfig, RiskManager};
 use mercury_strategy::{MarketMaker, StrategyRunner};
 use rust_decimal_macros::dec;
@@ -32,11 +34,11 @@ enum Commands {
         #[arg(short, long)]
         symbol: String,
 
-        /// Exchange to use (binance, yahoo)
+        /// Exchange to use (binance, coinbase, yahoo)
         #[arg(short, long, default_value = "binance")]
         exchange: String,
 
-        /// Strategy to use (market_maker, momentum, rsi, arbitrage)
+        /// Strategy to use (market_maker, momentum, rsi, arbitrage, inference)
         #[arg(short = 't', long, default_value = "market_maker")]
         strategy: String,
 
@@ -145,6 +147,12 @@ async fn run_trading(
     api_key: Option<String>,
     secret_key: Option<String>,
 ) -> Result<()> {
+    let cfg = config::Config::load_default();
+
+    // Apply config fallbacks for API credentials
+    let api_key = api_key.or_else(|| cfg.binance.api_key.clone());
+    let secret_key = secret_key.or_else(|| cfg.binance.secret_key.clone());
+
     info!(
         symbol = %symbol,
         exchange = %exchange,
@@ -172,6 +180,19 @@ async fn run_trading(
         max_orders_per_second = %risk_manager.config().max_orders_per_second,
         "Risk manager initialized"
     );
+
+    // Prometheus metrics endpoint
+    {
+        use metrics_exporter_prometheus::PrometheusBuilder;
+        let port = cfg.metrics.prometheus_port.unwrap_or(9090);
+        match PrometheusBuilder::new()
+            .with_http_listener(([0, 0, 0, 0], port))
+            .install()
+        {
+            Ok(()) => info!(port, "Prometheus metrics at http://0.0.0.0:{}/metrics", port),
+            Err(e) => tracing::warn!("Failed to start Prometheus exporter: {}", e),
+        }
+    }
 
     // Initialize Storage
     let storage_manager = Arc::new(mercury_storage::StorageManager::new("mercury.db").await?);
@@ -225,9 +246,16 @@ async fn run_trading(
                 let gateway_config = BinanceConfig {
                     api_key: api_key.unwrap_or_default(),
                     secret_key: secret_key.unwrap_or_default(),
-                    testnet: false, // Paper handled above, testnet param is for Binance Testnet
+                    testnet: false,
                 };
                 Arc::new(BinanceGateway::new(gateway_config))
+            }
+            "coinbase" => {
+                let gateway_config = CoinbaseConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    secret_key: secret_key.unwrap_or_default(),
+                };
+                Arc::new(CoinbaseGateway::new(gateway_config))
             }
             "yahoo" => {
                 anyhow::bail!("Yahoo Finance does not support trading");
@@ -236,18 +264,8 @@ async fn run_trading(
         }
     };
 
-    // Connect Gateway
-    // We need mutable access to call connect, but we put it in Arc.
-    // ExchangeGateway trait connect() takes &mut self?
-    // Yes. Using Arc<dyn ExchangeGateway> prevents calling connect().
-    // We should connect BEFORE putting in Arc, or use interior mutability in Gateway impls.
-    // Most Gateways use channels so connect() just spawns.
-    // Let's check traits.rs. connect(&mut self).
-    // Workaround: Call connect on concrete type before Arc-ing, or fix trait.
-    // For now, assume PaperGateway connects on new() (it spawns actor).
-    // BinanceGateway connects on verify?
-    // Let's assume connection is handled or we use unsafe/interior mutability pattern if needed.
-    // PaperGateway connect() is empty anyway.
+    // Connect gateway (verifies connectivity for live, no-op for paper).
+    gateway.connect().await.context("Gateway connect failed")?;
 
     // Create Order Manager
     use mercury_execution::OrderManager;
@@ -262,15 +280,13 @@ async fn run_trading(
     let gw_clone = Arc::clone(&gateway);
     let eb_clone = Arc::clone(&event_bus);
 
-    // We need to consume fills channel.
-    // Gateway::fills() returns Receiver.
-    // But gateway is Arc<dyn...>.
-    // fills() takes &self. So valid.
     let mut fill_rx = gw_clone.fills();
 
     tokio::spawn(async move {
         while let Some(fill) = fill_rx.recv().await {
             om_clone.on_fill(&fill);
+
+            metrics::counter!("mercury_fills_total").increment(1);
 
             // Publish fill event for strategies
             let event = mercury_core::Event::new(
@@ -290,8 +306,13 @@ async fn run_trading(
             match signal_rx.recv_async().await {
                 Ok(event) => {
                     if let mercury_core::EventPayload::Signal(signal) = event.payload {
-                        if let Err(e) = om_clone.submit(signal).await {
-                            tracing::error!("Order submission failed: {}", e);
+                        match om_clone.submit(signal).await {
+                            Ok(_) => {
+                                metrics::counter!("mercury_orders_submitted_total").increment(1);
+                            }
+                            Err(e) => {
+                                tracing::error!("Order submission failed: {}", e);
+                            }
                         }
                     }
                 }
@@ -300,6 +321,24 @@ async fn run_trading(
                 }
                 Err(mercury_core::RecvError::Closed) => break,
                 Err(mercury_core::RecvError::Empty) => unreachable!(),
+            }
+        }
+    });
+
+    // Latency gauge subscriber
+    let mut latency_rx = event_bus.subscribe_all();
+    tokio::spawn(async move {
+        loop {
+            match latency_rx.recv_async().await {
+                Ok(event) => {
+                    if let mercury_core::EventPayload::LatencyReport(r) = event.payload {
+                        metrics::gauge!("mercury_strategy_latency_p50_ns").set(r.p50_ns as f64);
+                        metrics::gauge!("mercury_strategy_latency_p99_ns").set(r.p99_ns as f64);
+                        metrics::gauge!("mercury_strategy_latency_p999_ns").set(r.p999_ns as f64);
+                    }
+                }
+                Err(mercury_core::RecvError::Closed) => break,
+                Err(_) => {}
             }
         }
     });
@@ -321,7 +360,6 @@ async fn run_trading(
             strategy_runner.add_strategy(Box::new(rsi));
         }
         "arbitrage" => {
-            // Min profit 10 USDT, Trade size 0.1
             let arb = mercury_strategy::ArbitrageStrategy::new(
                 mercury_core::Symbol::new(&symbol),
                 dec!(10.0),
@@ -329,13 +367,17 @@ async fn run_trading(
             );
             strategy_runner.add_strategy(Box::new(arb));
         }
+        "inference" => {
+            let inf = mercury_strategy::InferenceStrategy::new();
+            strategy_runner.add_strategy(Box::new(inf));
+        }
         _ => {
             anyhow::bail!("Unknown strategy: {}", strategy_name);
         }
     }
 
     // Run feeds based on exchange
-    let mut binance_feed_manager = FeedManager::new(Arc::clone(&event_bus));
+    let mut feed_manager = FeedManager::new(Arc::clone(&event_bus));
     let mut yahoo_feed = if exchange == "yahoo" {
         use mercury_market::YahooFeed;
         let feed = YahooFeed::new(vec![symbol.clone()]);
@@ -344,29 +386,42 @@ async fn run_trading(
         None
     };
 
-    if exchange == "binance" {
-        binance_feed_manager
-            .subscribe(BinanceParser, vec![symbol.clone()])
-            .await?;
-    } else if let Some(ref mut feed) = yahoo_feed {
-        feed.start(Arc::clone(&event_bus)).await?;
+    match exchange.as_str() {
+        "binance" => {
+            feed_manager
+                .subscribe(BinanceParser, vec![symbol.clone()])
+                .await?;
+        }
+        "coinbase" => {
+            feed_manager
+                .subscribe(CoinbaseParser, vec![symbol.clone()])
+                .await?;
+        }
+        _ => {
+            if let Some(ref mut feed) = yahoo_feed {
+                feed.start(Arc::clone(&event_bus)).await?;
+            }
+        }
     }
 
     info!("Mercury is running. Press Ctrl+C to stop.");
 
-    // Run strategy in background (async so it cancels cleanly on shutdown)
-    tokio::spawn(async move {
-        strategy_runner.run_async().await;
-    });
+    // Run strategy on a dedicated OS thread (spin-wait, no tokio scheduler).
+    // Pin to core 1 if available; core 0 is typically left for the OS and I/O.
+    let strategy_handle = strategy_runner.run_on_thread(Some(1));
 
     // Wait for shutdown
     tokio::signal::ctrl_c().await?;
     info!("Shutting down...");
 
-    binance_feed_manager.shutdown().await;
+    feed_manager.shutdown().await;
     if let Some(mut feed) = yahoo_feed {
         feed.stop().await;
     }
+
+    // Close the event bus so the strategy thread's recv() returns None and exits.
+    event_bus.close();
+    let _ = strategy_handle.join();
 
     Ok(())
 }

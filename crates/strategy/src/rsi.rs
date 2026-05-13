@@ -67,6 +67,7 @@ impl Strategy for RsiStrategy {
                     price: None,
                     quantity: self.quantity,
                     strategy: self.id(),
+                    cancel_replace: false,
                 }];
             }
 
@@ -81,6 +82,7 @@ impl Strategy for RsiStrategy {
                     price: None,
                     quantity: self.quantity,
                     strategy: self.id(),
+                    cancel_replace: false,
                 }];
             }
         }

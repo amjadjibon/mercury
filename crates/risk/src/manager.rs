@@ -203,6 +203,7 @@ mod tests {
             price: Some(dec!(50000)),
             quantity: dec!(0.2),
             strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
         };
 
         let result = manager.check(&signal);
@@ -221,6 +222,7 @@ mod tests {
             price: None,
             quantity: dec!(0.1),
             strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
         };
 
         let result = manager.check(&signal);

@@ -26,3 +26,7 @@ tracing-subscriber.workspace = true
 anyhow.workspace = true
 rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
+toml.workspace = true
+serde.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true

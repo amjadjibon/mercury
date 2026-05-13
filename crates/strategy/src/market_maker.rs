@@ -95,6 +95,7 @@ impl Strategy for MarketMaker {
                 price: Some(bid_price),
                 quantity: self.order_size,
                 strategy: self.id(),
+                cancel_replace: true,
             },
             Signal {
                 symbol: book.symbol,
@@ -103,6 +104,7 @@ impl Strategy for MarketMaker {
                 price: Some(ask_price),
                 quantity: self.order_size,
                 strategy: self.id(),
+                cancel_replace: false,
             },
         ]
     }

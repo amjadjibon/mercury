@@ -60,6 +60,12 @@ impl OrderManager {
 
     /// Submit a signal as an order.
     pub async fn submit(&self, signal: Signal) -> Result<OrderId, ExecutionError> {
+        if signal.cancel_replace {
+            if let Err(e) = self.cancel_all(signal.symbol).await {
+                tracing::warn!("cancel_replace cancel_all failed: {}", e);
+            }
+        }
+
         // Check risk
         self.risk_manager.check(&signal)?;
 

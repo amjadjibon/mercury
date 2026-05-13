@@ -82,6 +82,7 @@ impl Strategy for Momentum {
                 price: None,
                 quantity: self.order_size,
                 strategy: self.id(),
+                cancel_replace: false,
             }];
         } else if momentum < -self.threshold && self.position >= Decimal::ZERO {
             // Strong sell momentum, go short
@@ -92,6 +93,7 @@ impl Strategy for Momentum {
                 price: None,
                 quantity: self.order_size,
                 strategy: self.id(),
+                cancel_replace: false,
             }];
         }
 

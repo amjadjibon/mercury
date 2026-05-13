@@ -191,13 +191,24 @@ impl PaperGateway {
                         }
                     }
 
-                    // 3. Cancel Order
-                    Some((_symbol, id)) = cancel_rx.recv() => {
-                         if let Some(idx) = open_orders.iter().position(|&oid| oid == id) {
-                             open_orders.swap_remove(idx);
-                             orders.remove(&id);
-                             debug!("Simulated order {} cancelled", id);
-                         }
+                    // 3. Cancel / Cancel-all
+                    Some((symbol, id)) = cancel_rx.recv() => {
+                        if id == u64::MAX {
+                            let to_remove: Vec<OrderId> = open_orders
+                                .iter()
+                                .copied()
+                                .filter(|oid| orders.get(oid).map(|o| o.symbol == symbol).unwrap_or(false))
+                                .collect();
+                            for oid in &to_remove {
+                                orders.remove(oid);
+                            }
+                            open_orders.retain(|oid| orders.contains_key(oid));
+                            debug!("Cancelled {} paper orders for {}", to_remove.len(), symbol);
+                        } else if let Some(idx) = open_orders.iter().position(|&oid| oid == id) {
+                            open_orders.swap_remove(idx);
+                            orders.remove(&id);
+                            debug!("Simulated order {} cancelled", id);
+                        }
                     }
                 }
             }
@@ -240,7 +251,11 @@ impl ExchangeGateway for PaperGateway {
         Ok(())
     }
 
-    async fn cancel_all(&self, _symbol: Symbol) -> GatewayResult<u32> {
+    async fn cancel_all(&self, symbol: Symbol) -> GatewayResult<u32> {
+        self.cancel_tx
+            .send((symbol, u64::MAX))
+            .await
+            .map_err(|e| crate::traits::GatewayError::RequestFailed(e.to_string()))?;
         Ok(0)
     }
 
@@ -252,12 +267,12 @@ impl ExchangeGateway for PaperGateway {
             .expect("Fills receiver already taken")
     }
 
-    async fn connect(&mut self) -> GatewayResult<()> {
+    async fn connect(&self) -> GatewayResult<()> {
         info!("Connected to Paper Gateway");
         Ok(())
     }
 
-    async fn disconnect(&mut self) -> GatewayResult<()> {
+    async fn disconnect(&self) -> GatewayResult<()> {
         info!("Disconnected from Paper Gateway");
         Ok(())
     }

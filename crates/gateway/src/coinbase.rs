@@ -90,12 +90,12 @@ impl ExchangeGateway for CoinbaseGateway {
         rx
     }
 
-    async fn connect(&mut self) -> GatewayResult<()> {
+    async fn connect(&self) -> GatewayResult<()> {
         info!("Connected to Coinbase Gateway");
         Ok(())
     }
 
-    async fn disconnect(&mut self) -> GatewayResult<()> {
+    async fn disconnect(&self) -> GatewayResult<()> {
         info!("Disconnected from Coinbase Gateway");
         Ok(())
     }

@@ -71,6 +71,7 @@ mod tests {
             price: Some(dec!(50000)),
             quantity: dec!(0.5),
             strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
         };
 
         assert!(check_position_limit(dec!(0.6), &signal, dec!(1.0)).is_err());
@@ -86,6 +87,7 @@ mod tests {
             price: Some(dec!(50000)),
             quantity: dec!(0.5),
             strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
         };
 
         assert!(check_position_limit(dec!(-0.6), &signal, dec!(1.0)).is_err());

@@ -173,6 +173,8 @@ pub struct Signal {
     pub price: Option<Price>,
     pub quantity: Quantity,
     pub strategy: StrategyId,
+    #[serde(default)]
+    pub cancel_replace: bool,
 }
 
 /// Order to be submitted.

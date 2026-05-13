@@ -62,6 +62,7 @@ impl ArbitrageStrategy {
                         price: Some(*best_ask),
                         order_type: OrderType::Limit, // Should effectively be IOC
                         strategy: self.id(),
+                        cancel_replace: false,
                     });
 
                     // Generate Sell Signal
@@ -72,6 +73,7 @@ impl ArbitrageStrategy {
                         price: Some(*best_bid),
                         order_type: OrderType::Limit,
                         strategy: self.id(),
+                        cancel_replace: false,
                     });
 
                     // Note: This naive implementation would fire signals repeatedly.

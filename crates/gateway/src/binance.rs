@@ -201,14 +201,14 @@ impl ExchangeGateway for BinanceGateway {
         rx
     }
 
-    async fn connect(&mut self) -> GatewayResult<()> {
+    async fn connect(&self) -> GatewayResult<()> {
         // Verify connectivity
         let _ = self.server_time().await?;
         info!(exchange = "Binance", "Connected to gateway");
         Ok(())
     }
 
-    async fn disconnect(&mut self) -> GatewayResult<()> {
+    async fn disconnect(&self) -> GatewayResult<()> {
         info!(exchange = "Binance", "Disconnected from gateway");
         Ok(())
     }

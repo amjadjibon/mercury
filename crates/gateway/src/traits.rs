@@ -44,8 +44,8 @@ pub trait ExchangeGateway: Send + Sync {
     fn fills(&self) -> mpsc::Receiver<Fill>;
 
     /// Connect to the exchange.
-    async fn connect(&mut self) -> GatewayResult<()>;
+    async fn connect(&self) -> GatewayResult<()>;
 
     /// Disconnect from the exchange.
-    async fn disconnect(&mut self) -> GatewayResult<()>;
+    async fn disconnect(&self) -> GatewayResult<()>;
 }

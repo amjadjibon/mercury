@@ -18,5 +18,8 @@ rust_decimal.workspace = true
 yfinance-rs = "0.7"
 anyhow.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 rust_decimal_macros.workspace = true

@@ -100,6 +100,66 @@ impl StrategyRunner {
         }
     }
 
+    /// Spawn a dedicated OS thread for the strategy hot path.
+    ///
+    /// The thread spin-waits on the ring buffer (`recv()`) with no tokio
+    /// scheduler involvement. If `core_id` is `Some(n)`, the thread is pinned
+    /// to that logical CPU core via `core_affinity`.
+    ///
+    /// Returns the `JoinHandle`. Call `event_bus.close()` to signal shutdown;
+    /// the thread exits cleanly when `recv()` returns `None`.
+    pub fn run_on_thread(
+        mut self,
+        core_id: Option<usize>,
+    ) -> std::thread::JoinHandle<()> {
+        std::thread::Builder::new()
+            .name("mercury-strategy".into())
+            .spawn(move || {
+                if let Some(idx) = core_id {
+                    if let Some(cores) = core_affinity::get_core_ids() {
+                        if let Some(&core) = cores.get(idx) {
+                            if core_affinity::set_for_current(core) {
+                                info!(core = idx, "Strategy thread pinned to CPU core");
+                            } else {
+                                warn!(core = idx, "Failed to pin strategy thread to CPU core");
+                            }
+                        } else {
+                            warn!(core = idx, available = cores.len(), "CPU core index out of range");
+                        }
+                    }
+                }
+
+                let mut receiver = self.event_bus.subscribe();
+                info!("Strategy thread started (spin-wait mode)");
+
+                while let Some(event) = receiver.recv() {
+                    let t0 = mercury_core::types::now_nanos();
+                    let signals = self.process(&event);
+                    if !signals.is_empty() {
+                        self.publish_signals(signals);
+                    }
+                    self.latency.record((mercury_core::types::now_nanos() - t0) as u64);
+
+                    let count = self.latency.count();
+                    if count % 1000 == 0 && count > 0 {
+                        let report = mercury_core::Event::new(
+                            self.event_bus.next_id(),
+                            mercury_core::EventPayload::LatencyReport(mercury_core::LatencyReport {
+                                p50_ns: self.latency.p50(),
+                                p99_ns: self.latency.p99(),
+                                p999_ns: self.latency.p999(),
+                                count,
+                            }),
+                        );
+                        let _ = self.event_bus.try_publish(report);
+                    }
+                }
+
+                info!("Strategy thread exiting");
+            })
+            .expect("failed to spawn strategy thread")
+    }
+
     /// Run the strategy runner as an async task (for live trading).
     ///
     /// Uses the broadcast fan-out channel so the task has proper await points
