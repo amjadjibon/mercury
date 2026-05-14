@@ -1,6 +1,6 @@
 //! Risk manager for pre-trade validation.
 
-use crate::checks::{check_daily_loss, check_position_limit, check_rate_limit};
+use crate::checks::{calculate_skew, check_daily_loss, check_position_limit, check_rate_limit};
 use crate::kill_switch::KillSwitch;
 use mercury_core::{Fill, Price, Quantity, Side, Signal, Symbol};
 use parking_lot::RwLock;
@@ -51,6 +51,17 @@ impl Default for RiskConfig {
     }
 }
 
+/// A snapshot of (fill_price, mid_price_at_fill_time, side, fill timestamp nanos).
+#[derive(Debug, Clone)]
+struct FillSnapshot {
+    #[allow(dead_code)]
+    fill_price: Price,
+    mid_at_fill: Price,
+    side: Side,
+    #[allow(dead_code)]
+    timestamp_ns: i64,
+}
+
 /// Risk manager for pre-trade and real-time risk controls.
 pub struct RiskManager {
     config: RiskConfig,
@@ -58,6 +69,8 @@ pub struct RiskManager {
     daily_pnl: RwLock<Price>,
     order_timestamps: RwLock<Vec<i64>>,
     kill_switch: Arc<KillSwitch>,
+    /// Recent fills for toxicity detection (capped at 20)
+    fill_snapshots: RwLock<Vec<FillSnapshot>>,
 }
 
 impl RiskManager {
@@ -69,6 +82,7 @@ impl RiskManager {
             daily_pnl: RwLock::new(Decimal::ZERO),
             order_timestamps: RwLock::new(Vec::new()),
             kill_switch: Arc::new(KillSwitch::new()),
+            fill_snapshots: RwLock::new(Vec::new()),
         }
     }
 
@@ -168,10 +182,70 @@ impl RiskManager {
         &self.config
     }
 
+    /// Inventory skew for a symbol in [-1.0, 1.0]. Positive = long-heavy.
+    pub fn skew(&self, symbol: Symbol) -> Decimal {
+        let positions = self.positions.read();
+        let current = positions.get(&symbol).copied().unwrap_or(Decimal::ZERO);
+        let max = self
+            .config
+            .max_position
+            .get(&symbol)
+            .copied()
+            .unwrap_or(self.config.default_max_position);
+        calculate_skew(current, max)
+    }
+
+    /// Record a fill for toxicity analysis. `mid_at_fill` is the book mid at the moment of fill.
+    /// After 500 ms, the caller should call `check_toxicity` to evaluate adverse movement.
+    pub fn record_fill_for_toxicity(&self, fill: &Fill, mid_at_fill: Price) {
+        let snapshot = FillSnapshot {
+            fill_price: fill.price,
+            mid_at_fill,
+            side: fill.side,
+            timestamp_ns: mercury_core::now_nanos() as i64,
+        };
+        let mut snaps = self.fill_snapshots.write();
+        snaps.push(snapshot);
+        if snaps.len() > 20 {
+            snaps.remove(0);
+        }
+    }
+
+    /// Check recent fills for adverse selection (toxicity). Returns true if N consecutive
+    /// fills moved against us by > threshold bps, and activates the kill switch if so.
+    ///
+    /// Call periodically (e.g. every 500 ms) with the current mid price.
+    pub fn check_toxicity(&self, current_mid: Price, threshold_bps: u32, min_consecutive: usize) {
+        let threshold = current_mid * Decimal::from(threshold_bps) / Decimal::from(10_000);
+        let snaps = self.fill_snapshots.read();
+        if snaps.len() < min_consecutive {
+            return;
+        }
+
+        let recent = &snaps[snaps.len().saturating_sub(min_consecutive)..];
+        let all_adverse = recent.iter().all(|s| {
+            let adverse_move = match s.side {
+                Side::Buy => current_mid < s.mid_at_fill - threshold,
+                Side::Sell => current_mid > s.mid_at_fill + threshold,
+            };
+            adverse_move
+        });
+
+        if all_adverse {
+            warn!(
+                consecutive = min_consecutive,
+                threshold_bps,
+                "Fill toxicity detected — activating kill switch"
+            );
+            self.kill_switch.activate();
+        }
+    }
+
     /// Reset daily state.
     pub fn reset_daily(&self) {
         *self.daily_pnl.write() = Decimal::ZERO;
         self.order_timestamps.write().clear();
+        self.fill_snapshots.write().clear();
         self.kill_switch.reset();
     }
 }

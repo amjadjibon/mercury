@@ -104,7 +104,7 @@ impl Strategy for MarketMaker {
                 price: Some(ask_price),
                 quantity: self.order_size,
                 strategy: self.id(),
-                cancel_replace: false,
+                cancel_replace: true,
             },
         ]
     }

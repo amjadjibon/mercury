@@ -59,7 +59,6 @@ impl Strategy for RsiStrategy {
             // Buy signal: RSI < 30 (Oversold)
             if val < self.oversold && self.position <= Decimal::ZERO {
                 info!(rsi = %val, "RSI Oversold - Buying");
-                self.position += self.quantity;
                 return vec![Signal {
                     symbol: self.symbol.clone(),
                     side: Side::Buy,
@@ -74,7 +73,6 @@ impl Strategy for RsiStrategy {
             // Sell signal: RSI > 70 (Overbought)
             if val > self.overbought && self.position >= Decimal::ZERO {
                 info!(rsi = %val, "RSI Overbought - Selling");
-                self.position -= self.quantity;
                 return vec![Signal {
                     symbol: self.symbol.clone(),
                     side: Side::Sell,
@@ -90,8 +88,14 @@ impl Strategy for RsiStrategy {
         Vec::new()
     }
 
-    fn on_fill(&mut self, _fill: &mercury_core::Fill) {
-        // Position tracking could be updated here for accuracy
+    fn on_fill(&mut self, fill: &mercury_core::Fill) {
+        if fill.symbol != self.symbol {
+            return;
+        }
+        match fill.side {
+            Side::Buy => self.position += fill.quantity,
+            Side::Sell => self.position -= fill.quantity,
+        }
     }
 
     fn reset(&mut self) {

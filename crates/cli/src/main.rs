@@ -181,6 +181,26 @@ async fn run_trading(
         "Risk manager initialized"
     );
 
+    // Reset daily PnL and rate-limit counters at each UTC midnight.
+    {
+        let rm = Arc::clone(&risk_manager);
+        tokio::spawn(async move {
+            loop {
+                let secs_until_midnight = {
+                    use std::time::{SystemTime, UNIX_EPOCH};
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    86400 - (now % 86400)
+                };
+                tokio::time::sleep(std::time::Duration::from_secs(secs_until_midnight)).await;
+                rm.reset_daily();
+                info!("Daily risk state reset at UTC midnight");
+            }
+        });
+    }
+
     // Prometheus metrics endpoint
     {
         use metrics_exporter_prometheus::PrometheusBuilder;
@@ -599,10 +619,15 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
     let result = exchange.result();
     info!("Backtest Result: {:?}", result);
     println!("\n=== Backtest Complete ===");
-    println!("Total Trades: {}", result.total_trades);
-    println!("Total Volume: {}", result.total_volume);
-    println!("PnL: {:.2} USDT", result.pnl);
-    println!("Max Drawdown: {:.2}%", result.max_drawdown * dec!(100));
+    println!("Total Trades  : {}", result.total_trades);
+    println!("Total Volume  : {}", result.total_volume);
+    println!("PnL           : {:.4} USDT", result.pnl);
+    println!("Max Drawdown  : {:.2}%", result.max_drawdown * dec!(100));
+    println!("Sharpe Ratio  : {:.3}", result.sharpe_ratio);
+    println!("Win Rate      : {:.1}%", result.win_rate * 100.0);
+    println!("Profit Factor : {:.3}", result.profit_factor);
+    println!("Avg Win       : {:.4} USDT", result.avg_win);
+    println!("Avg Loss      : {:.4} USDT", result.avg_loss);
     println!("=========================\n");
 
     Ok(())

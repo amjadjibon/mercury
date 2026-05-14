@@ -4,6 +4,7 @@ use crate::parser::{FeedMessage, FeedParser};
 use futures_util::{SinkExt, StreamExt};
 use mercury_core::{Event, EventBus, EventPayload};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
@@ -20,14 +21,13 @@ pub enum FeedError {
     ParseError(#[from] crate::parser::ParseError),
 }
 
-/// Manages WebSocket feed connections.
+/// Manages WebSocket feed connections with automatic reconnection.
 pub struct FeedManager {
     event_bus: Arc<EventBus>,
     shutdown_tx: Option<mpsc::Sender<()>>,
 }
 
 impl FeedManager {
-    /// Create a new feed manager.
     pub fn new(event_bus: Arc<EventBus>) -> Self {
         Self {
             event_bus,
@@ -36,103 +36,132 @@ impl FeedManager {
     }
 
     /// Subscribe to market data for the given symbols.
+    /// Spawns a background task that reconnects with exponential backoff on disconnect.
     pub async fn subscribe<P: FeedParser>(
         &mut self,
         parser: P,
         symbols: Vec<String>,
     ) -> Result<(), FeedError> {
+        // Verify we can connect at least once before returning.
         let url = parser.ws_url(&symbols);
         info!(exchange = %parser.exchange(), ?symbols, "Connecting to feed");
-
-        // TCP_NODELAY: disable Nagle's algorithm for minimum wire latency.
-        let (ws_stream, _) = connect_async_tls_with_config(&url, None, true, None)
+        connect_async_tls_with_config(&url, None, true, None)
             .await
             .map_err(|e| FeedError::ConnectionFailed(e.to_string()))?;
 
-        // SO_BUSY_POLL: poll NIC from userspace instead of waiting for interrupt (Linux only).
-        #[cfg(target_os = "linux")]
-        set_busy_poll(&ws_stream, 50);
-
-        let (mut write, mut read) = ws_stream.split();
-
-        // Send subscription message if needed
-        if let Some(sub_msg) = parser.subscribe_message(&symbols) {
-            write
-                .send(Message::Text(sub_msg.into()))
-                .await
-                .map_err(|e| FeedError::WebSocketError(e.to_string()))?;
-        }
-
         let event_bus = Arc::clone(&self.event_bus);
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
         self.shutdown_tx = Some(shutdown_tx);
 
-        // Spawn message processing task
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    msg = read.next() => {
-                        match msg {
-                            Some(Ok(Message::Text(text))) => {
-                                match parser.parse(text.as_bytes()) {
-                                    Ok(feed_msg) => {
-                                        if let Some(event) = Self::to_event(&event_bus, feed_msg) {
-                                            if let Err(e) = event_bus.try_publish(event) {
-                                                warn!("Failed to publish event: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("Parse error: {}", e);
-                                    }
-                                }
-                            }
-                            Some(Ok(Message::Binary(data))) => {
-                                match parser.parse(&data) {
-                                    Ok(feed_msg) => {
-                                        if let Some(event) = Self::to_event(&event_bus, feed_msg) {
-                                            if let Err(e) = event_bus.try_publish(event) {
-                                                warn!("Failed to publish event: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("Parse error: {}", e);
-                                    }
-                                }
-                            }
-                            Some(Ok(Message::Ping(data))) => {
-                                // Pong is sent automatically by tungstenite
-                                info!("Received ping");
-                                let _ = data; // Suppress unused warning
-                            }
-                            Some(Ok(Message::Close(_))) => {
-                                info!("WebSocket closed");
-                                break;
-                            }
-                            Some(Err(e)) => {
-                                error!("WebSocket error: {}", e);
-                                break;
-                            }
-                            None => {
-                                info!("WebSocket stream ended");
-                                break;
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ = shutdown_rx.recv() => {
-                        info!("Shutdown signal received");
-                        break;
-                    }
-                }
-            }
-        });
+        tokio::spawn(Self::run_with_reconnect(parser, symbols, event_bus, shutdown_rx));
 
         Ok(())
     }
 
-    /// Convert a feed message to an event.
+    async fn run_with_reconnect<P: FeedParser>(
+        parser: P,
+        symbols: Vec<String>,
+        event_bus: Arc<EventBus>,
+        mut shutdown_rx: mpsc::Receiver<()>,
+    ) {
+        // Backoff levels: 100ms, 500ms, 2s, 10s, 60s
+        let backoff_steps: &[Duration] = &[
+            Duration::from_millis(100),
+            Duration::from_millis(500),
+            Duration::from_secs(2),
+            Duration::from_secs(10),
+            Duration::from_secs(60),
+        ];
+        let mut attempt = 0usize;
+
+        loop {
+            let url = parser.ws_url(&symbols);
+
+            match connect_async_tls_with_config(&url, None, true, None).await {
+                Err(e) => {
+                    let delay = backoff_steps[attempt.min(backoff_steps.len() - 1)];
+                    warn!(attempt, ?delay, "Feed connect failed: {}; retrying", e);
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = shutdown_rx.recv() => return,
+                    }
+                    attempt += 1;
+                    continue;
+                }
+                Ok((ws_stream, _)) => {
+                    attempt = 0; // reset backoff on success
+                    info!(exchange = %parser.exchange(), "Feed connected");
+
+                    #[cfg(target_os = "linux")]
+                    set_busy_poll(&ws_stream, 50);
+
+                    let (mut write, mut read) = ws_stream.split();
+
+                    if let Some(sub_msg) = parser.subscribe_message(&symbols) {
+                        if let Err(e) = write.send(Message::Text(sub_msg.into())).await {
+                            warn!("Failed to send subscription: {}", e);
+                            continue;
+                        }
+                    }
+
+                    // Process messages until disconnect or shutdown
+                    loop {
+                        tokio::select! {
+                            msg = read.next() => {
+                                match msg {
+                                    Some(Ok(Message::Text(text))) => {
+                                        Self::dispatch(&parser, text.as_bytes(), &event_bus);
+                                    }
+                                    Some(Ok(Message::Binary(data))) => {
+                                        Self::dispatch(&parser, &data, &event_bus);
+                                    }
+                                    Some(Ok(Message::Ping(_))) => {}
+                                    Some(Ok(Message::Close(_))) => {
+                                        warn!(exchange = %parser.exchange(), "Feed closed by server; reconnecting");
+                                        break;
+                                    }
+                                    Some(Err(e)) => {
+                                        error!(exchange = %parser.exchange(), "Feed error: {}; reconnecting", e);
+                                        break;
+                                    }
+                                    None => {
+                                        warn!(exchange = %parser.exchange(), "Feed stream ended; reconnecting");
+                                        break;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            _ = shutdown_rx.recv() => {
+                                info!(exchange = %parser.exchange(), "Feed shutdown");
+                                return;
+                            }
+                        }
+                    }
+
+                    // Brief delay before reconnect attempt
+                    let delay = backoff_steps[attempt.min(backoff_steps.len() - 1)];
+                    tokio::time::sleep(delay).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    fn dispatch<P: FeedParser>(parser: &P, data: &[u8], event_bus: &Arc<EventBus>) {
+        match parser.parse(data) {
+            Ok(feed_msg) => {
+                if let Some(event) = Self::to_event(event_bus, feed_msg) {
+                    if let Err(e) = event_bus.try_publish(event) {
+                        warn!("Failed to publish event: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Parse error: {}", e);
+            }
+        }
+    }
+
     fn to_event(event_bus: &EventBus, msg: FeedMessage) -> Option<Event> {
         let payload = match msg {
             FeedMessage::DepthSnapshot(update) | FeedMessage::DepthUpdate(update) => {
@@ -141,11 +170,9 @@ impl FeedManager {
             FeedMessage::Trade(trade) => EventPayload::Trade(trade),
             FeedMessage::Ping | FeedMessage::Pong => return None,
         };
-
         Some(Event::new(event_bus.next_id(), payload))
     }
 
-    /// Shutdown the feed manager.
     pub async fn shutdown(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(()).await;
@@ -153,12 +180,6 @@ impl FeedManager {
     }
 }
 
-/// Set `SO_BUSY_POLL` on the underlying TCP socket.
-///
-/// Instructs the kernel to spin-poll the NIC receive queue for up to
-/// `busy_poll_us` microseconds before yielding to the interrupt path.
-/// Requires `net.core.busy_poll` sysctl and a NIC driver that supports NAPI.
-/// No-op (with a warning) if the setsockopt call fails.
 #[cfg(target_os = "linux")]
 fn set_busy_poll(
     ws: &tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,

@@ -1,9 +1,13 @@
 use crate::models::TradeModel;
 use anyhow::Result;
-use mercury_core::{Event, EventPayload, Fill};
+use mercury_core::{Event, EventPayload, Fill, Signal};
+use rust_decimal::prelude::ToPrimitive;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use tracing::{error, info};
+
+static LATENCY_STORE_INTERVAL: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 pub struct StorageManager {
     pool: SqlitePool,
@@ -38,9 +42,67 @@ impl StorageManager {
                     error!("Failed to store fill: {}", e);
                 }
             }
-            // Add more handlers here (e.g., Signal, Order update)
+            EventPayload::Signal(signal) => {
+                if let Err(e) = self.store_signal(event.id, signal).await {
+                    error!("Failed to store signal: {}", e);
+                }
+            }
+            EventPayload::LatencyReport(report) => {
+                // Throttle: store at most once every 10 reports (~10 s at default rate).
+                let prev = LATENCY_STORE_INTERVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if prev % 10 == 0 {
+                    if let Err(e) = self.store_latency(report.p50_ns, report.p99_ns, report.p999_ns).await {
+                        error!("Failed to store latency: {}", e);
+                    }
+                }
+            }
             _ => {}
         }
+    }
+
+    async fn store_signal(&self, event_id: u64, signal: &Signal) -> Result<()> {
+        let side = match signal.side {
+            mercury_core::Side::Buy => "BUY",
+            mercury_core::Side::Sell => "SELL",
+        };
+        let order_type = format!("{:?}", signal.order_type);
+        let price = signal.price.and_then(|p| p.to_f64());
+        let qty = signal.quantity.to_f64().unwrap_or(0.0);
+        let now = mercury_core::now_nanos();
+
+        sqlx::query(
+            r#"
+            INSERT INTO orders (id, exchange, symbol, side, order_type, price, quantity, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'submitted', ?, ?)
+            "#,
+        )
+        .bind(event_id.to_string())
+        .bind(signal.symbol.as_str())
+        .bind(signal.symbol.as_str())
+        .bind(side)
+        .bind(order_type)
+        .bind(price)
+        .bind(qty)
+        .bind(now as i64)
+        .bind(now as i64)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn store_latency(&self, p50_ns: u64, p99_ns: u64, p999_ns: u64) -> Result<()> {
+        let now = mercury_core::now_nanos() as i64;
+        sqlx::query(
+            "INSERT INTO latency_snapshots (p50_ns, p99_ns, p999_ns, timestamp) VALUES (?, ?, ?, ?)",
+        )
+        .bind(p50_ns as i64)
+        .bind(p99_ns as i64)
+        .bind(p999_ns as i64)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     async fn store_fill(&self, fill: &Fill) -> Result<()> {

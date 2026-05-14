@@ -1,6 +1,7 @@
 //! Mercury TUI - Terminal user interface for monitoring.
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -25,6 +26,18 @@ mod ipc;
 mod widgets;
 use ipc::IpcClient;
 use widgets::{ChartWidget, DepthWidget};
+
+#[derive(Parser)]
+#[command(name = "mercury-tui", about = "Mercury TUI monitor")]
+struct Args {
+    /// Symbol to monitor (e.g. BTCUSDT, ETHUSDT)
+    #[arg(short, long, default_value = "BTCUSDT")]
+    symbol: String,
+
+    /// Exchange (binance, coinbase)
+    #[arg(short, long, default_value = "binance")]
+    exchange: String,
+}
 
 struct FillEntry {
     elapsed_secs: u64,
@@ -56,6 +69,7 @@ struct App {
     unrealized_pnl: Decimal,
     realized_pnl: Decimal,
     price_history: Vec<(f64, f64)>,
+    pnl_history: Vec<(f64, f64)>,
     fills: Vec<FillEntry>,
     kill_switch: bool,
     start_time: std::time::Instant,
@@ -64,10 +78,9 @@ struct App {
 }
 
 impl App {
-    fn new() -> Self {
-        let symbol = Symbol::new("BTCUSDT");
+    fn new(symbol: Symbol, exchange: Exchange) -> Self {
         Self {
-            book: OrderBook::new(Exchange::Binance, symbol),
+            book: OrderBook::new(exchange, symbol),
             symbol,
             pnl_tracker: PnLTracker::new(),
             position: Decimal::ZERO,
@@ -75,6 +88,7 @@ impl App {
             unrealized_pnl: Decimal::ZERO,
             realized_pnl: Decimal::ZERO,
             price_history: Vec::with_capacity(200),
+            pnl_history: Vec::with_capacity(200),
             fills: Vec::new(),
             kill_switch: false,
             start_time: std::time::Instant::now(),
@@ -89,6 +103,17 @@ impl App {
             self.price_history.remove(0);
         }
         self.price_history.push((elapsed, price));
+        self.push_pnl();
+    }
+
+    fn push_pnl(&mut self) {
+        let elapsed = self.start_time.elapsed().as_secs_f64();
+        if let Some(pnl) = self.total_pnl().to_f64() {
+            if self.pnl_history.len() >= 200 {
+                self.pnl_history.remove(0);
+            }
+            self.pnl_history.push((elapsed, pnl));
+        }
     }
 
     fn on_fill(&mut self, fill: &mercury_core::Fill) {
@@ -121,6 +146,7 @@ impl App {
         if self.fills.len() > 50 {
             self.fills.remove(0);
         }
+        self.push_pnl();
     }
 
     fn avg_entry(&self) -> Option<Decimal> {
@@ -137,13 +163,20 @@ impl App {
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+    let symbol = Symbol::new(&args.symbol);
+    let exchange = match args.exchange.to_lowercase().as_str() {
+        "coinbase" => Exchange::Coinbase,
+        _ => Exchange::Binance,
+    };
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new();
+    let mut app = App::new(symbol, exchange);
 
     let ipc_client = IpcClient::new(std::path::PathBuf::from("/tmp/mercury.sock"));
     let (tx, rx) = tokio::sync::mpsc::channel::<mercury_core::Event>(256);
@@ -289,8 +322,17 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
         .split(chunks[1]);
 
-    let chart = ChartWidget::new(&app.price_history, "Mid Price", Color::Cyan);
-    f.render_widget(chart.render(), top[0]);
+    let chart_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .split(top[0]);
+
+    let price_chart = ChartWidget::new(&app.price_history, "Mid Price", Color::Cyan);
+    f.render_widget(price_chart.render(), chart_area[0]);
+
+    let pnl_line_color = if app.total_pnl() >= Decimal::ZERO { Color::Green } else { Color::Red };
+    let pnl_chart = ChartWidget::new(&app.pnl_history, "PnL (USDT)", pnl_line_color);
+    f.render_widget(pnl_chart.render(), chart_area[1]);
 
     let fill_items: Vec<ListItem> = app
         .fills

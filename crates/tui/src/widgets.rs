@@ -86,68 +86,100 @@ impl<'a> ChartWidget<'a> {
     }
 }
 
-pub struct DepthWidget<'a> {
-    pub bids: &'a [mercury_core::Level],
-    pub asks: &'a [mercury_core::Level],
-    pub max_depth: f64,
+pub struct DepthWidget {
+    bid_points: Vec<(f64, f64)>,
+    ask_points: Vec<(f64, f64)>,
+    x_min: f64,
+    x_max: f64,
+    y_max: f64,
 }
 
-impl<'a> DepthWidget<'a> {
-    pub fn new(bids: &'a [mercury_core::Level], asks: &'a [mercury_core::Level]) -> Self {
-        // Find max density for scaling
-        let max_bid = bids
-            .iter()
-            .map(|l| l.quantity.to_string().parse::<f64>().unwrap_or(0.0))
-            .fold(0.0, f64::max);
-        let max_ask = asks
-            .iter()
-            .map(|l| l.quantity.to_string().parse::<f64>().unwrap_or(0.0))
-            .fold(0.0, f64::max);
+impl DepthWidget {
+    pub fn new(bids: &[mercury_core::Level], asks: &[mercury_core::Level]) -> Self {
+        use rust_decimal::prelude::ToPrimitive;
 
-        Self {
-            bids,
-            asks,
-            max_depth: max_bid.max(max_ask).max(1.0),
+        let mut bid_points: Vec<(f64, f64)> = Vec::with_capacity(bids.len());
+        let mut cum: f64 = 0.0;
+        for level in bids.iter() {
+            if let (Some(p), Some(q)) = (level.price.to_f64(), level.quantity.to_f64()) {
+                cum += q;
+                bid_points.push((p, cum));
+            }
         }
+        // Bids arrive high→low; reverse so the line plots left-to-right
+        bid_points.reverse();
+
+        let mut ask_points: Vec<(f64, f64)> = Vec::with_capacity(asks.len());
+        cum = 0.0;
+        for level in asks.iter() {
+            if let (Some(p), Some(q)) = (level.price.to_f64(), level.quantity.to_f64()) {
+                cum += q;
+                ask_points.push((p, cum));
+            }
+        }
+
+        let x_min = bid_points.first().map(|(p, _)| *p).unwrap_or(0.0);
+        let x_max = ask_points.last().map(|(p, _)| *p).unwrap_or(1.0);
+        let y_max = bid_points
+            .iter()
+            .chain(ask_points.iter())
+            .map(|(_, q)| *q)
+            .fold(0.0_f64, f64::max)
+            .max(1.0);
+
+        Self { bid_points, ask_points, x_min, x_max, y_max }
     }
 
-    pub fn render(&self) -> ratatui::widgets::BarChart<'_> {
-        // Create a simple histogram representation
-        // For TUI limitation, we use BarChart or Sparkline. BarChart is better for categorized data.
-        // But BarChart takes discrete bars. Let's simplify and just return a usage description since
-        // full depth visualization in terminal needs more complex canvas implementation.
-        // Actually, let's implement a sparkline-like view using block characters if we had more time.
-        // For now, let's use a BarChart to show spread distribution.
+    pub fn render(&self) -> Chart<'_> {
+        let datasets = vec![
+            Dataset::default()
+                .name("Bids")
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Color::Green))
+                .data(&self.bid_points),
+            Dataset::default()
+                .name("Asks")
+                .marker(Marker::Braille)
+                .graph_type(GraphType::Line)
+                .style(Style::default().fg(Color::Red))
+                .data(&self.ask_points),
+        ];
 
-        ratatui::widgets::BarChart::default()
-            .block(
-                Block::default()
-                    .title("Depth Distribution")
-                    .borders(Borders::ALL),
+        let x_min = self.x_min;
+        let x_max = self.x_max;
+        let y_max = self.y_max;
+
+        Chart::new(datasets)
+            .block(Block::default().title("Depth").borders(Borders::ALL))
+            .x_axis(
+                Axis::default()
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds([x_min * 0.999, x_max * 1.001])
+                    .labels(vec![
+                        Span::styled(
+                            format!("{:.0}", x_min),
+                            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:.0}", x_max),
+                            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                    ]),
             )
-            .data(&[
-                (
-                    "Best Bid",
-                    (self
-                        .bids
-                        .first()
-                        .map(|l| l.quantity.to_string().parse::<f64>().unwrap_or(0.0))
-                        .unwrap_or(0.0)
-                        * 100.0) as u64,
-                ),
-                (
-                    "Best Ask",
-                    (self
-                        .asks
-                        .first()
-                        .map(|l| l.quantity.to_string().parse::<f64>().unwrap_or(0.0))
-                        .unwrap_or(0.0)
-                        * 100.0) as u64,
-                ),
-            ])
-            .bar_width(10)
-            .bar_gap(2)
-            .max((self.max_depth * 100.0) as u64)
+            .y_axis(
+                Axis::default()
+                    .title("Cum Qty")
+                    .style(Style::default().fg(Color::Gray))
+                    .bounds([0.0, y_max * 1.05])
+                    .labels(vec![
+                        Span::raw("0"),
+                        Span::styled(
+                            format!("{:.2}", y_max),
+                            Style::default().add_modifier(ratatui::style::Modifier::BOLD),
+                        ),
+                    ]),
+            )
     }
 }
 

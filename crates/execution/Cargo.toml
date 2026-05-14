@@ -10,6 +10,7 @@ mercury-risk = { path = "../risk" }
 mercury-gateway = { path = "../gateway" }
 tokio.workspace = true
 rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

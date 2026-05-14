@@ -74,7 +74,6 @@ impl Strategy for Momentum {
         let momentum = self.momentum();
 
         if momentum > self.threshold && self.position <= Decimal::ZERO {
-            // Strong buy momentum, go long
             return vec![Signal {
                 symbol: trade.symbol,
                 side: Side::Buy,
@@ -85,13 +84,35 @@ impl Strategy for Momentum {
                 cancel_replace: false,
             }];
         } else if momentum < -self.threshold && self.position >= Decimal::ZERO {
-            // Strong sell momentum, go short
             return vec![Signal {
                 symbol: trade.symbol,
                 side: Side::Sell,
                 order_type: OrderType::Market,
                 price: None,
                 quantity: self.order_size,
+                strategy: self.id(),
+                cancel_replace: false,
+            }];
+        }
+
+        // Exit: close long when momentum fades below zero; close short when it rises above zero.
+        if momentum < Decimal::ZERO && self.position > Decimal::ZERO {
+            return vec![Signal {
+                symbol: trade.symbol,
+                side: Side::Sell,
+                order_type: OrderType::Market,
+                price: None,
+                quantity: self.position,
+                strategy: self.id(),
+                cancel_replace: false,
+            }];
+        } else if momentum > Decimal::ZERO && self.position < Decimal::ZERO {
+            return vec![Signal {
+                symbol: trade.symbol,
+                side: Side::Buy,
+                order_type: OrderType::Market,
+                price: None,
+                quantity: self.position.abs(),
                 strategy: self.id(),
                 cancel_replace: false,
             }];
