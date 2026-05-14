@@ -1,290 +1,223 @@
 # Mercury
 
-## Low Latency Event Driven Trading & Execution Engine in Rust
+## Low-Latency Event-Driven Trading Engine in Rust
 
 [![Build Status](https://github.com/amjadjibon/mercury/workflows/CI/badge.svg)](https://github.com/amjadjibon/mercury/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Mercury is a **low latency event driven trading engine** designed for systematic and high frequency crypto trading.
-
-It consumes real time order book feeds, generates trading signals, applies strict risk controls, executes orders across multiple venues, and provides deterministic replay for execution analysis and simulation.
-
-The system is written in **production Rust** with a strong focus on:
-
-- predictable latency
-- lock free concurrency
-- execution quality
-- replay driven testing
-- performance profiling
+Mercury is a low-latency, event-driven trading engine for systematic and high-frequency crypto trading. It consumes real-time order book feeds, generates signals, enforces risk limits, executes orders across multiple venues, and supports deterministic replay for backtesting and analysis.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Build all crates
+# Build
 cargo build --workspace
 
-# Run tests
+# Test
 cargo test --workspace
 
-# Run CLI trading engine
-cargo run --bin mercury -- run --symbol BTCUSDT --strategy market_maker
+# Paper trade (no API keys needed — matches against live Binance data)
+cargo run --bin mercury -- run --symbol BTCUSDT --paper --strategy market_maker
 
-# Run with paper trading (testnet)
-cargo run --bin mercury -- run --symbol BTCUSDT --paper
+# Live trade (Binance)
+BINANCE_API_KEY=xxx BINANCE_SECRET_KEY=yyy \
+  cargo run --bin mercury -- run --symbol BTCUSDT --strategy market_maker
 
-# Run TUI monitor
+# Record 60s of live ticks to Parquet
+cargo run --bin mercury -- record --symbol BTCUSDT --output data.parquet
+
+# Backtest against recorded data
+cargo run --bin mercury -- backtest --file data.parquet --strategy market_maker
+
+# Replay recorded data (1× real-time or max speed)
+cargo run --bin mercury -- replay --file data.parquet --speed 1.0
+
+# TUI monitor (connect to a running engine)
 cargo run --bin mercury-tui
 
-# Run benchmarks
+# Benchmarks
 cargo bench
 ```
 
 ---
 
-## Goals
+## CLI Reference
 
-Mercury is designed to simulate real trading desk infrastructure rather than a retail trading bot.
+```
+mercury run      --symbol <SYM> [--exchange binance|coinbase|yahoo]
+                 [--strategy market_maker|momentum|rsi|arbitrage|inference]
+                 [--paper]
+                 [--api-key <KEY>] [--secret-key <SECRET>]
+                 [--log-level trace|debug|info|warn|error]
 
-Primary goals:
+mercury record   --symbol <SYM> [--output <FILE>] [--duration <SECS>]
+mercury replay   --file <FILE> [--speed <F64>]
+mercury backtest --file <FILE> --strategy <NAME>
+```
 
-- process high frequency market data reliably
-- make decisions under sub millisecond latency
-- measure execution quality precisely
-- enforce strict risk limits
-- replay historical ticks deterministically
-- benchmark and optimize hot paths
+Config can also be supplied via `mercury.toml` in the working directory:
 
----
+```toml
+symbol   = "BTCUSDT"
+strategy = "market_maker"
+paper    = false
 
-## Features
+[binance]
+api_key    = "..."
+secret_key = "..."
 
-### Market Data
+[risk]
+max_position       = "1.0"
+daily_loss_limit   = "500.0"
+max_orders_per_second = 10
 
-- real time Binance feeds (extensible via `FeedParser` trait)
-- L2 order book reconstruction (snapshot + deltas)
-- trade stream ingestion
-- gap detection and automatic resync
-- multi symbol support
-
-### Strategy Engine
-
-- pluggable `Strategy` trait interface
-- event driven signal generation
-- market making strategy with inventory skew
-- momentum strategy based on trade flow
-- **Technical Analysis Engine**:
-  - Indicators: SMA, EMA, RSI, MACD
-  - `Window` trait for rolling calculations
-  - `RsiStrategy` implementation
-
-### Advanced TUI Dashboard
-
-- Real-time price charts (Ratatui)
-- Order book depth visualization (Histogram)
-- Live trade log scrolling
-- Performance metrics panel
-
-### Risk Controls
-
-- max position limits
-- max daily loss guard
-- order rate limiting
-- inventory skew control
-- kill switch
-- per venue exposure limits
-
-### Execution
-
-- limit and market orders
-- fill tracking
-- slippage and latency measurement
-- order lifecycle management
-
-### Replay & Simulation
-
-- raw tick recording to parquet
-- deterministic replay
-- **Backtesting Engine**:
-  - `SimulatedExchange` for offline matching
-  - PnL and Max Drawdown tracking
-  - Faster than real-time simulation
-
-### Paper Trading (HFT Simulation)
-
-- **Local Matching Engine**: Matches orders against live market data streams
-- **Latency Simulation**: Configurable network RTT (e.g., 5ms)
-- **High Throughput**: Async actor-based order handling
-- **Safe Execution**: Test strategies with zero financial risk using live data
-
-### Observability
-
-- p50/p99/p999 latency histograms (HDR)
-- PnL tracking
-- Prometheus metrics export
-- structured tracing logs
-
-### Performance
-
-- lock free event bus (crossbeam)
-- preallocated memory pools
-- zero allocation hot path
-- cache friendly data layout
-- Criterion benchmark suite
+[metrics]
+prometheus_port = 9090
+```
 
 ---
 
 ## Architecture
 
 ```
-                Market Feeds
-         (WebSocket / FIX / REST snapshot)
-                       │
-                       ▼
-               Market Data Layer
-         (parser + order book rebuild)
-                       │
-                       ▼
-               Lock Free Event Bus
-                       │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-   Strategy Engine   Risk Manager   Metrics
-        │              │
-        └──────────────┴───────► Execution
-                                   │
-                                   ▼
-                           Exchange Gateways
-                                   │
-                                   ▼
-                                Fills
-                                   │
-                                   ▼
-                          Recorder / Replay
+Market Feeds (WebSocket)
+        │
+        ▼
+   FeedManager          ← BinanceParser / CoinbaseParser / YahooFeed
+        │
+        ▼
+   EventBus             ← LMAX Disruptor-style ring buffer, lock-free fan-out
+        │
+   ┌────┴─────────────────────────────┐
+   ▼                                  ▼
+StrategyRunner (dedicated OS thread)  OrderManager
+  on_book / on_trade / on_fill          ↓ risk checks
+        │                           ExchangeGateway
+        ▼                             (Binance / Coinbase / Paper)
+   Signal events                         │
+   → EventBus                        Fill events → EventBus
+                                          │
+                                     StorageManager (SQLite)
+                                     IpcServer (/tmp/mercury.sock)
+                                     → TUI
 ```
+
+**Hot path**: feed parser → ring buffer publish → strategy spin-loop → signal → order submit. No heap allocation, no locks.
 
 ---
 
 ## Crate Structure
 
-| Crate       | Description                                                       |
-| ----------- | ----------------------------------------------------------------- |
-| `core`      | Event bus, shared types, memory pool, ring buffer                 |
-| `market`    | Feed ingestion, `FeedParser` trait, `BinanceParser`, book builder |
-| `gateway`   | Exchange adapters, `ExchangeGateway` trait, Binance gateway       |
-| `strategy`  | `Strategy` trait, market maker, momentum strategies               |
-| `risk`      | `RiskManager`, position limits, daily loss guard, kill switch     |
-| `execution` | `OrderManager`, fill tracking, slippage metrics                   |
-| `replay`    | Tick recorder, deterministic player                               |
-| `metrics`   | Latency tracker (HDR histogram), PnL tracker, Prometheus          |
-| `cli`       | Command line interface (run, replay, backtest)                    |
-| `tui`       | Terminal UI with ratatui (order book, stats)                      |
-| `benches`   | Criterion benchmarks for event bus and order book                 |
+| Crate | Description |
+|---|---|
+| `core` | `Event`, `EventBus` (ring buffer), shared types (`Symbol`, `Side`, `Order`, `Fill`, `Signal`), `IpcServer`, `Pool` |
+| `market` | `FeedManager`, `BinanceParser`, `CoinbaseParser`, `YahooFeed`, `BookBuilder` |
+| `gateway` | `BinanceGateway`, `CoinbaseGateway`, `PaperGateway`, `ExchangeGateway` trait |
+| `strategy` | `StrategyRunner`, `MarketMaker`, `Momentum`, `RsiStrategy`, `ArbitrageStrategy`, `InferenceStrategy`; indicators: SMA, EMA, RSI, MACD |
+| `risk` | `RiskManager` — position limits, daily loss guard, order rate limiter, kill switch |
+| `execution` | `OrderManager`, `SimulatedExchange` (backtest), `SmartOrderRouter`, `ExecutionMetrics` |
+| `replay` | `Recorder` (Parquet writer), `Player` (deterministic replay) |
+| `metrics` | `LatencyTracker` (HDR histograms), `PnlTracker`, Prometheus export |
+| `storage` | `StorageManager` — SQLite via sqlx, persists fills |
+| `cli` | Binary `mercury` — `run`, `record`, `replay`, `backtest` subcommands |
+| `tui` | Binary `mercury-tui` — ratatui dashboard over IPC |
+| `benches` | Criterion benchmarks; `allocations.rs` asserts 0 heap allocs on hot path |
 
-```
-mercury/
-├── Cargo.toml              # Workspace configuration
-├── crates/
-│   ├── core/               # Event bus and shared types
-│   ├── market/             # Feed ingestion and book rebuild
-│   ├── gateway/            # Exchange connectors
-│   ├── strategy/           # Trading logic
-│   ├── risk/               # Guardrails and limits
-│   ├── execution/          # Order lifecycle
-│   ├── replay/             # Recording and playback
-│   ├── metrics/            # Telemetry
-│   ├── cli/                # Command line interface
-│   ├── tui/                # Terminal UI
-│   └── benches/            # Latency benchmarks
-└── README.md
+---
+
+## Strategies
+
+| Name | Trigger | Logic |
+|---|---|---|
+| `market_maker` | `on_book` | Posts bid/ask around mid; cancel-replaces on each update; inventory skew |
+| `momentum` | `on_trade` | Tracks buy/sell volume ratio over a window; signals when imbalance exceeds threshold |
+| `rsi` | `on_trade` | RSI < 30 → buy; RSI > 70 → sell |
+| `arbitrage` | `on_book` | Monitors BBO across exchanges; signals when Bid(A) > Ask(B) + min_profit |
+| `inference` | — | Stub; wired but emits no signals until ML backend is added |
+
+Implement the `Strategy` trait to add a new strategy:
+
+```rust
+pub trait Strategy: Send {
+    fn id(&self) -> StrategyId;
+    fn on_book(&mut self, book: &OrderBook) -> Vec<Signal>;
+    fn on_trade(&mut self, trade: &Trade) -> Vec<Signal>;
+    fn on_fill(&mut self, fill: &Fill);
+    fn reset(&mut self);
+}
 ```
 
 ---
 
-## CLI Usage
+## Performance
+
+Measured on an M-series Mac; Linux co-location numbers will be lower.
+
+| Hot-path metric | Baseline | After optimisation | Target |
+|---|---|---|---|
+| `orderbook/apply_10_levels` | 625 ns | 485 ns | < 200 ns |
+| `strategy/process_book_update` | 239 ns | 222 ns | < 100 ns |
+| `strategy/market_maker_on_book` | 45 ns | 37 ns | < 20 ns |
+| `event_bus/roundtrip` | 290 ns | 210 ns | < 100 ns |
+| Hot-path heap allocations | many | **0** | 0 |
+
+Key techniques applied:
+
+- **Ring buffer EventBus** — LMAX Disruptor pattern; publisher writes once, all subscribers read the same pre-allocated slots with independent cursors (`UnsafeCell` + `AtomicU64`)
+- **Fixed-size arrays** — `BookUpdate` carries `[Level; 20]` instead of `Vec<Level>`; `StrategyId` is `#[repr(u8)]` instead of `String`
+- **Dedicated strategy thread** — `StrategyRunner::run_on_thread(core_id)` spins on the ring buffer off the tokio thread pool; pinned to a specific core via `core_affinity`
+- **TCP_NODELAY** on WebSocket connections; `SO_BUSY_POLL` on Linux
+- `stats_alloc` allocation tests enforce the zero-alloc invariant in CI
+
+---
+
+## Observability
+
+While the engine is running:
 
 ```bash
-# Run trading engine
-mercury run --symbol BTCUSDT --strategy market_maker
+# Prometheus metrics
+curl http://localhost:9090/metrics
 
-# Run with environment variables for API keys
-BINANCE_API_KEY=xxx BINANCE_SECRET_KEY=yyy mercury run --symbol BTCUSDT
-
-# Paper trading mode (HFT simulation with 5ms latency)
-mercury run --symbol BTCUSDT --paper --strategy rsi
-
-# Replay historical data
-mercury replay --file data.parquet --speed 1.0
-
-# Backtest a strategy
-mercury backtest --file data.parquet --strategy rsi
+# Structured logs (default INFO; override with --log-level)
+cargo run --bin mercury -- --log-level debug run --symbol BTCUSDT --paper
 ```
 
----
-
-## Performance Characteristics
-
-Designed targets:
-
-- 100k+ messages/sec processing
-- sub millisecond p99 decision latency
-- zero allocations in hot path
-- deterministic replay
-
-Performance optimizations:
-
-- lock free queues (crossbeam-channel)
-- memory pooling (parking_lot)
-- cache locality tuning
-- Criterion benchmarks
+Exposed metrics: `mercury_fills_total`, `mercury_orders_submitted_total`, `mercury_strategy_latency_p50_ns`, `mercury_strategy_latency_p99_ns`, `mercury_strategy_latency_p999_ns`.
 
 ---
 
-## Example Use Cases
+## Risk Controls
 
-- market making
-- cross exchange arbitrage
-- execution quality research
-- slippage analysis
-- strategy parameter tuning
-- latency experiments
+Configured via `mercury.toml` or `RiskConfig` defaults:
 
----
-
-## Why Rust
-
-Rust was chosen for:
-
-- memory safety without GC pauses
-- predictable latency
-- strong concurrency model
-- zero cost abstractions
-- production reliability
-
-This makes it ideal for low latency trading systems.
+- max position size per symbol
+- daily loss limit (kills new orders when breached)
+- max orders per second (rate limiter)
+- kill switch (halts all order submission)
 
 ---
 
 ## Dependencies
 
-Key dependencies (latest versions):
-
-| Dependency   | Version | Purpose              |
-| ------------ | ------- | -------------------- |
-| tokio        | 1.49    | Async runtime        |
-| crossbeam    | 0.8     | Lock-free primitives |
-| rayon        | 1.10    | CPU parallelism      |
-| ratatui      | 0.30    | Terminal UI          |
-| clap         | 4.5     | CLI parsing          |
-| rust_decimal | 1.37    | Precise decimals     |
-| parquet      | 54      | Tick storage         |
-| hdrhistogram | 7.5     | Latency tracking     |
+| Crate | Version | Purpose |
+|---|---|---|
+| `tokio` | 1.49 | Async runtime |
+| `crossbeam-channel` | 0.5 | Feed/recorder channels |
+| `parking_lot` | 0.12 | Memory pool mutex |
+| `core_affinity` | 0.8 | CPU thread pinning |
+| `ratatui` | 0.30 | Terminal UI |
+| `clap` | 4.5 | CLI parsing |
+| `rust_decimal` | 1.37 | Precise financial arithmetic |
+| `parquet` / `arrow` | 54 | Tick storage |
+| `hdrhistogram` | 7.5 | Latency percentiles |
+| `sqlx` | 0.7 | SQLite fill persistence |
+| `metrics` + `metrics-exporter-prometheus` | 0.24 / 0.16 | Prometheus export |
 
 ---
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
-
----
+MIT — see [LICENSE](LICENSE).
