@@ -2,8 +2,9 @@
 
 use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol};
+use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
 use reqwest::Client;
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -212,6 +213,59 @@ impl ExchangeGateway for BinanceGateway {
         info!(exchange = "Binance", "Disconnected from gateway");
         Ok(())
     }
+
+    async fn open_orders(&self, symbol: Symbol) -> GatewayResult<Vec<Order>> {
+        let url = format!("{}/api/v3/openOrders", self.config.base_url());
+        let timestamp = self.server_time().await?;
+
+        let params: Vec<(&str, String)> = vec![
+            ("symbol", symbol.as_str().to_string()),
+            ("timestamp", timestamp.to_string()),
+        ];
+        let signed_query = self.sign_query(&params);
+
+        let raw: Vec<OpenOrderResponse> = self
+            .client
+            .get(format!("{}?{}", url, signed_query))
+            .header("X-MBX-APIKEY", &self.config.api_key)
+            .send()
+            .await
+            .map_err(|e| GatewayError::RequestFailed(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| GatewayError::RequestFailed(e.to_string()))?;
+
+        let orders = raw
+            .into_iter()
+            .filter_map(|r| {
+                let side = match r.side.as_str() {
+                    "BUY" => Side::Buy,
+                    "SELL" => Side::Sell,
+                    _ => return None,
+                };
+                let order_type = match r.order_type.as_str() {
+                    "LIMIT" => OrderType::Limit,
+                    _ => OrderType::Market,
+                };
+                let price_dec: Decimal = r.price.parse().ok()?;
+                let price = if price_dec.is_zero() { None } else { Some(price_dec) };
+                let quantity: Decimal = r.orig_qty.parse().ok()?;
+                Some(Order {
+                    id: r.order_id,
+                    exchange: Exchange::Binance,
+                    symbol,
+                    side,
+                    order_type,
+                    price,
+                    quantity,
+                    time_in_force: TimeInForce::GTC,
+                    created_at: (r.time * 1_000_000) as i64, // ms → ns
+                })
+            })
+            .collect();
+
+        Ok(orders)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -231,6 +285,20 @@ struct CancelledOrder {
     #[serde(rename = "orderId")]
     #[allow(dead_code)]
     order_id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenOrderResponse {
+    #[serde(rename = "orderId")]
+    order_id: u64,
+    side: String,
+    #[serde(rename = "type")]
+    order_type: String,
+    /// Binance returns price as a decimal string e.g. "50000.00"
+    price: String,
+    #[serde(rename = "origQty")]
+    orig_qty: String,
+    time: u64,
 }
 
 #[cfg(test)]

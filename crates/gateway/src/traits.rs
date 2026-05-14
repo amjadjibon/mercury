@@ -48,4 +48,10 @@ pub trait ExchangeGateway: Send + Sync {
 
     /// Disconnect from the exchange.
     async fn disconnect(&self) -> GatewayResult<()>;
+
+    /// Fetch currently open orders from the exchange (for crash recovery).
+    /// Returns an empty vec by default (paper/stub gateways have no persistent state).
+    async fn open_orders(&self, _symbol: Symbol) -> GatewayResult<Vec<Order>> {
+        Ok(vec![])
+    }
 }

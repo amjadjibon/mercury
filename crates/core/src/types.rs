@@ -67,6 +67,8 @@ pub enum Exchange {
     Binance,
     Bybit,
     Coinbase,
+    Kraken,
+    Okx,
     Yahoo,
 }
 
@@ -76,6 +78,8 @@ impl fmt::Display for Exchange {
             Exchange::Binance => write!(f, "Binance"),
             Exchange::Bybit => write!(f, "Bybit"),
             Exchange::Coinbase => write!(f, "Coinbase"),
+            Exchange::Kraken => write!(f, "Kraken"),
+            Exchange::Okx => write!(f, "OKX"),
             Exchange::Yahoo => write!(f, "Yahoo"),
         }
     }

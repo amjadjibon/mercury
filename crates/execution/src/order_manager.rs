@@ -211,4 +211,23 @@ impl OrderManager {
     pub fn get_order(&self, order_id: OrderId) -> Option<LiveOrder> {
         self.open_orders.read().get(&order_id).cloned()
     }
+
+    /// Restore open orders recovered from the exchange after a restart.
+    /// Does not re-submit them — they are already live on the exchange.
+    pub fn restore_open_orders(&self, orders: Vec<Order>) {
+        let mut open = self.open_orders.write();
+        for order in orders {
+            info!(order_id = order.id, symbol = %order.symbol, side = ?order.side, "Restoring open order");
+            open.insert(
+                order.id,
+                LiveOrder {
+                    order: order.clone(),
+                    status: OrderStatus::Open,
+                    filled_quantity: rust_decimal::Decimal::ZERO,
+                    avg_fill_price: None,
+                    last_update: now_nanos(),
+                },
+            );
+        }
+    }
 }

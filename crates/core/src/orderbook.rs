@@ -1,36 +1,36 @@
 //! L2 Order Book implementation.
+//!
+//! Uses sorted Vec<Level> instead of BTreeMap for better cache locality at
+//! typical 20-level depth. Binary search is O(log 20) ≈ 5 comparisons with
+//! no pointer chasing, vs. BTreeMap's B-tree node traversal.
 
 use crate::events::{BookUpdate, Level};
 use crate::types::{Exchange, Price, Quantity, Symbol};
 use rust_decimal::Decimal;
-use std::collections::BTreeMap;
 
 /// L2 Order Book maintaining price levels.
 #[derive(Debug, Clone)]
 pub struct OrderBook {
     pub exchange: Exchange,
     pub symbol: Symbol,
-    /// Bids sorted by price descending (best bid first).
-    bids: BTreeMap<Price, Quantity>,
-    /// Asks sorted by price ascending (best ask first).
-    asks: BTreeMap<Price, Quantity>,
-    /// Last update sequence number.
+    /// Bids sorted descending (best bid first = index 0).
+    bids: Vec<Level>,
+    /// Asks sorted ascending (best ask first = index 0).
+    asks: Vec<Level>,
     pub sequence: u64,
 }
 
 impl OrderBook {
-    /// Create a new empty order book.
     pub fn new(exchange: Exchange, symbol: Symbol) -> Self {
         Self {
             exchange,
             symbol,
-            bids: BTreeMap::new(),
-            asks: BTreeMap::new(),
+            bids: Vec::with_capacity(32),
+            asks: Vec::with_capacity(32),
             sequence: 0,
         }
     }
 
-    /// Apply an update to the order book.
     pub fn apply_update(&mut self, update: &BookUpdate) {
         if update.is_snapshot {
             self.bids.clear();
@@ -38,41 +38,23 @@ impl OrderBook {
         }
 
         for level in update.bid_levels() {
-            if level.quantity == Decimal::ZERO {
-                self.bids.remove(&level.price);
-            } else {
-                self.bids.insert(level.price, level.quantity);
-            }
+            upsert_desc(&mut self.bids, *level);
         }
-
         for level in update.ask_levels() {
-            if level.quantity == Decimal::ZERO {
-                self.asks.remove(&level.price);
-            } else {
-                self.asks.insert(level.price, level.quantity);
-            }
+            upsert_asc(&mut self.asks, *level);
         }
 
         self.sequence = update.sequence;
     }
 
-    /// Get the best bid (highest buy price).
     pub fn best_bid(&self) -> Option<Level> {
-        self.bids
-            .iter()
-            .next_back()
-            .map(|(&price, &quantity)| Level::new(price, quantity))
+        self.bids.first().copied()
     }
 
-    /// Get the best ask (lowest sell price).
     pub fn best_ask(&self) -> Option<Level> {
-        self.asks
-            .iter()
-            .next()
-            .map(|(&price, &quantity)| Level::new(price, quantity))
+        self.asks.first().copied()
     }
 
-    /// Get the mid price.
     pub fn mid_price(&self) -> Option<Price> {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => Some((bid.price + ask.price) / Decimal::TWO),
@@ -80,7 +62,6 @@ impl OrderBook {
         }
     }
 
-    /// Get the spread.
     pub fn spread(&self) -> Option<Price> {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => Some(ask.price - bid.price),
@@ -88,7 +69,6 @@ impl OrderBook {
         }
     }
 
-    /// Get the spread in basis points.
     pub fn spread_bps(&self) -> Option<Price> {
         match (self.mid_price(), self.spread()) {
             (Some(mid), Some(spread)) if mid > Decimal::ZERO => {
@@ -98,36 +78,30 @@ impl OrderBook {
         }
     }
 
-    /// Get top N bid levels.
     pub fn top_bids(&self, n: usize) -> Vec<Level> {
+        self.bids.iter().take(n).copied().collect()
+    }
+
+    pub fn top_asks(&self, n: usize) -> Vec<Level> {
+        self.asks.iter().take(n).copied().collect()
+    }
+
+    pub fn bid_depth(&self, up_to_price: Price) -> Quantity {
         self.bids
             .iter()
-            .rev()
-            .take(n)
-            .map(|(&price, &quantity)| Level::new(price, quantity))
-            .collect()
+            .filter(|l| l.price >= up_to_price)
+            .map(|l| l.quantity)
+            .sum()
     }
 
-    /// Get top N ask levels.
-    pub fn top_asks(&self, n: usize) -> Vec<Level> {
+    pub fn ask_depth(&self, up_to_price: Price) -> Quantity {
         self.asks
             .iter()
-            .take(n)
-            .map(|(&price, &quantity)| Level::new(price, quantity))
-            .collect()
+            .filter(|l| l.price <= up_to_price)
+            .map(|l| l.quantity)
+            .sum()
     }
 
-    /// Get total bid quantity up to a price.
-    pub fn bid_depth(&self, up_to_price: Price) -> Quantity {
-        self.bids.range(up_to_price..).map(|(_, &qty)| qty).sum()
-    }
-
-    /// Get total ask quantity up to a price.
-    pub fn ask_depth(&self, up_to_price: Price) -> Quantity {
-        self.asks.range(..=up_to_price).map(|(_, &qty)| qty).sum()
-    }
-
-    /// Check if the order book is valid (no crossed book).
     pub fn is_valid(&self) -> bool {
         match (self.best_bid(), self.best_ask()) {
             (Some(bid), Some(ask)) => bid.price < ask.price,
@@ -135,25 +109,63 @@ impl OrderBook {
         }
     }
 
-    /// Get number of bid levels.
     pub fn bid_levels(&self) -> usize {
         self.bids.len()
     }
 
-    /// Get number of ask levels.
     pub fn ask_levels(&self) -> usize {
         self.asks.len()
+    }
+}
+
+/// Insert or update a bid level (sorted descending by price).
+/// Zero-quantity level removes the entry.
+fn upsert_desc(levels: &mut Vec<Level>, level: Level) {
+    // Binary search for this price (descending, so compare reversed)
+    match levels.binary_search_by(|l| level.price.cmp(&l.price)) {
+        Ok(idx) => {
+            if level.quantity.is_zero() {
+                levels.remove(idx);
+            } else {
+                levels[idx].quantity = level.quantity;
+            }
+        }
+        Err(idx) => {
+            if !level.quantity.is_zero() {
+                levels.insert(idx, level);
+            }
+        }
+    }
+}
+
+/// Insert or update an ask level (sorted ascending by price).
+/// Zero-quantity level removes the entry.
+fn upsert_asc(levels: &mut Vec<Level>, level: Level) {
+    match levels.binary_search_by(|l| l.price.cmp(&level.price)) {
+        Ok(idx) => {
+            if level.quantity.is_zero() {
+                levels.remove(idx);
+            } else {
+                levels[idx].quantity = level.quantity;
+            }
+        }
+        Err(idx) => {
+            if !level.quantity.is_zero() {
+                levels.insert(idx, level);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Exchange;
     use rust_decimal_macros::dec;
 
     fn sample_book() -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
-        let update = BookUpdate::from_slices(
+        book.apply_update(&BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[
@@ -168,8 +180,7 @@ mod tests {
             ],
             1,
             true,
-        );
-        book.apply_update(&update);
+        ));
         book
     }
 
@@ -195,23 +206,53 @@ mod tests {
     #[test]
     fn test_delta_update() {
         let mut book = sample_book();
-        let update = BookUpdate::from_slices(
+        book.apply_update(&BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[Level::new(dec!(50000), dec!(0))],
             &[Level::new(dec!(50001), dec!(5.0))],
             2,
             false,
-        );
-        book.apply_update(&update);
-
+        ));
         assert_eq!(book.best_bid().unwrap().price, dec!(49999));
         assert_eq!(book.best_ask().unwrap().quantity, dec!(5.0));
     }
 
     #[test]
     fn test_is_valid() {
+        assert!(sample_book().is_valid());
+    }
+
+    #[test]
+    fn test_top_bids_ordered_desc() {
         let book = sample_book();
-        assert!(book.is_valid());
+        let bids = book.top_bids(3);
+        assert_eq!(bids[0].price, dec!(50000));
+        assert_eq!(bids[1].price, dec!(49999));
+        assert_eq!(bids[2].price, dec!(49998));
+    }
+
+    #[test]
+    fn test_top_asks_ordered_asc() {
+        let book = sample_book();
+        let asks = book.top_asks(3);
+        assert_eq!(asks[0].price, dec!(50001));
+        assert_eq!(asks[1].price, dec!(50002));
+        assert_eq!(asks[2].price, dec!(50003));
+    }
+
+    #[test]
+    fn test_remove_zero_qty() {
+        let mut book = sample_book();
+        // Remove best ask
+        book.apply_update(&BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[],
+            &[Level::new(dec!(50001), dec!(0))],
+            3,
+            false,
+        ));
+        assert_eq!(book.best_ask().unwrap().price, dec!(50002));
     }
 }

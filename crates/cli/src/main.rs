@@ -5,8 +5,11 @@ mod config;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use mercury_core::EventBus;
-use mercury_gateway::{BinanceConfig, BinanceGateway, CoinbaseConfig, CoinbaseGateway, ExchangeGateway};
-use mercury_market::{BinanceParser, CoinbaseParser, FeedManager};
+use mercury_gateway::{
+    BinanceConfig, BinanceGateway, BybitConfig, BybitGateway, CoinbaseConfig, CoinbaseGateway,
+    ExchangeGateway, KrakenConfig, KrakenGateway, OkxConfig, OkxGateway,
+};
+use mercury_market::{BinanceParser, BybitParser, CoinbaseParser, FeedManager, KrakenParser, OkxParser};
 use mercury_risk::{RiskConfig, RiskManager};
 use mercury_strategy::{MarketMaker, StrategyRunner};
 use rust_decimal_macros::dec;
@@ -30,9 +33,9 @@ struct Cli {
 enum Commands {
     /// Run the trading engine
     Run {
-        /// Trading symbol (e.g., BTCUSDT for crypto, AAPL for stocks)
-        #[arg(short, long)]
-        symbol: String,
+        /// Trading symbol(s) — repeat for multiple: -s BTCUSDT -s ETHUSDT
+        #[arg(short, long, required = true)]
+        symbol: Vec<String>,
 
         /// Exchange to use (binance, coinbase, yahoo)
         #[arg(short, long, default_value = "binance")]
@@ -46,13 +49,17 @@ enum Commands {
         #[arg(long)]
         paper: bool,
 
-        /// Binance API key
-        #[arg(long, env = "BINANCE_API_KEY")]
+        /// Exchange API key (Binance / Bybit / OKX / Kraken)
+        #[arg(long, env = "EXCHANGE_API_KEY")]
         api_key: Option<String>,
 
-        /// Binance secret key
-        #[arg(long, env = "BINANCE_SECRET_KEY")]
+        /// Exchange secret key
+        #[arg(long, env = "EXCHANGE_SECRET_KEY")]
         secret_key: Option<String>,
+
+        /// OKX passphrase (required for OKX only)
+        #[arg(long, env = "OKX_PASSPHRASE")]
+        okx_passphrase: Option<String>,
     },
 
     /// Replay historical data
@@ -112,14 +119,15 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run {
-            symbol,
+            symbol: symbols,
             exchange,
             strategy,
             paper,
             api_key,
             secret_key,
+            okx_passphrase,
         } => {
-            run_trading(symbol, exchange, strategy, paper, api_key, secret_key).await?;
+            run_trading(symbols, exchange, strategy, paper, api_key, secret_key, okx_passphrase).await?;
         }
         Commands::Replay { file, speed } => {
             run_replay(file, speed).await?;
@@ -140,21 +148,24 @@ async fn main() -> Result<()> {
 }
 
 async fn run_trading(
-    symbol: String,
+    symbols: Vec<String>,
     exchange: String,
     strategy_name: String,
     paper: bool,
     api_key: Option<String>,
     secret_key: Option<String>,
+    okx_passphrase: Option<String>,
 ) -> Result<()> {
     let cfg = config::Config::load_default();
 
-    // Apply config fallbacks for API credentials
     let api_key = api_key.or_else(|| cfg.binance.api_key.clone());
     let secret_key = secret_key.or_else(|| cfg.binance.secret_key.clone());
 
+    // Use first symbol as the primary symbol for single-symbol strategies/recovery.
+    let symbol = symbols.first().cloned().unwrap_or_else(|| "BTCUSDT".to_string());
+
     info!(
-        symbol = %symbol,
+        symbols = ?symbols,
         exchange = %exchange,
         strategy = %strategy_name,
         paper = paper,
@@ -277,6 +288,30 @@ async fn run_trading(
                 };
                 Arc::new(CoinbaseGateway::new(gateway_config))
             }
+            "okx" => {
+                let gateway_config = OkxConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    secret_key: secret_key.unwrap_or_default(),
+                    passphrase: okx_passphrase.unwrap_or_default(),
+                    demo: false,
+                };
+                Arc::new(OkxGateway::new(gateway_config))
+            }
+            "bybit" => {
+                let gateway_config = BybitConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    secret_key: secret_key.unwrap_or_default(),
+                    testnet: false,
+                };
+                Arc::new(BybitGateway::new(gateway_config))
+            }
+            "kraken" => {
+                let gateway_config = KrakenConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    secret_key: secret_key.unwrap_or_default(),
+                };
+                Arc::new(KrakenGateway::new(gateway_config))
+            }
             "yahoo" => {
                 anyhow::bail!("Yahoo Finance does not support trading");
             }
@@ -294,6 +329,19 @@ async fn run_trading(
         Arc::clone(&gateway),
         Arc::clone(&event_bus),
     ));
+
+    // Crash recovery: re-register any orders that were open on the exchange before this run.
+    if !paper {
+        let sym = mercury_core::Symbol::new(&symbol);
+        match gateway.open_orders(sym).await {
+            Ok(open) if !open.is_empty() => {
+                info!(count = open.len(), "Recovering open orders from exchange");
+                order_manager.restore_open_orders(open);
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Could not fetch open orders for recovery: {}", e),
+        }
+    }
 
     // Handle Fills
     let om_clone = Arc::clone(&order_manager);
@@ -400,7 +448,7 @@ async fn run_trading(
     let mut feed_manager = FeedManager::new(Arc::clone(&event_bus));
     let mut yahoo_feed = if exchange == "yahoo" {
         use mercury_market::YahooFeed;
-        let feed = YahooFeed::new(vec![symbol.clone()]);
+        let feed = YahooFeed::new(symbols.clone());
         Some(feed)
     } else {
         None
@@ -409,12 +457,27 @@ async fn run_trading(
     match exchange.as_str() {
         "binance" => {
             feed_manager
-                .subscribe(BinanceParser, vec![symbol.clone()])
+                .subscribe(BinanceParser, symbols.clone())
                 .await?;
         }
         "coinbase" => {
             feed_manager
-                .subscribe(CoinbaseParser, vec![symbol.clone()])
+                .subscribe(CoinbaseParser, symbols.clone())
+                .await?;
+        }
+        "okx" => {
+            feed_manager
+                .subscribe(OkxParser, symbols.clone())
+                .await?;
+        }
+        "bybit" => {
+            feed_manager
+                .subscribe(BybitParser, symbols.clone())
+                .await?;
+        }
+        "kraken" => {
+            feed_manager
+                .subscribe(KrakenParser, symbols.clone())
                 .await?;
         }
         _ => {
