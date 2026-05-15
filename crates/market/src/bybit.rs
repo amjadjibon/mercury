@@ -87,7 +87,7 @@ impl FeedParser for BybitParser {
                         quantity: Decimal::from_str(&t.v).unwrap_or_default(),
                         side: if t.s == "Buy" { Side::Buy } else { Side::Sell },
                         trade_id: t.i.parse().unwrap_or(0),
-                        timestamp: t.T * 1_000_000,
+                        timestamp: t.t * 1_000_000,
                     };
                     return Ok(FeedMessage::Trade(trade));
                 }
@@ -141,7 +141,7 @@ struct BybitTrade {
     s: String,
     /// Timestamp ms
     #[serde(rename = "T")]
-    T: i64,
+    t: i64,
 }
 
 #[cfg(test)]

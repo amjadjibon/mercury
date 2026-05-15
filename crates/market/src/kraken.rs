@@ -4,7 +4,6 @@ use crate::parser::{FeedMessage, FeedParser, ParseError};
 use mercury_core::{BookUpdate, Exchange, Level, Side, Symbol, Trade};
 use rust_decimal::Decimal;
 use serde::Deserialize;
-use std::str::FromStr;
 
 pub struct KrakenParser;
 

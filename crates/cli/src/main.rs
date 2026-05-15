@@ -60,6 +60,10 @@ enum Commands {
         /// OKX passphrase (required for OKX only)
         #[arg(long, env = "OKX_PASSPHRASE")]
         okx_passphrase: Option<String>,
+
+        /// Path to ONNX model file for InferenceStrategy
+        #[arg(long, env = "MERCURY_MODEL_PATH")]
+        model_path: Option<String>,
     },
 
     /// Replay historical data
@@ -126,8 +130,9 @@ async fn main() -> Result<()> {
             api_key,
             secret_key,
             okx_passphrase,
+            model_path,
         } => {
-            run_trading(symbols, exchange, strategy, paper, api_key, secret_key, okx_passphrase).await?;
+            run_trading(symbols, exchange, strategy, paper, api_key, secret_key, okx_passphrase, model_path).await?;
         }
         Commands::Replay { file, speed } => {
             run_replay(file, speed).await?;
@@ -155,6 +160,7 @@ async fn run_trading(
     api_key: Option<String>,
     secret_key: Option<String>,
     okx_passphrase: Option<String>,
+    model_path: Option<String>,
 ) -> Result<()> {
     let cfg = config::Config::load_default();
 
@@ -436,7 +442,11 @@ async fn run_trading(
             strategy_runner.add_strategy(Box::new(arb));
         }
         "inference" => {
-            let inf = mercury_strategy::InferenceStrategy::new();
+            let inf = mercury_strategy::InferenceStrategy::new(
+                symbol.as_str(),
+                dec!(0.1),
+                model_path.as_deref(),
+            );
             strategy_runner.add_strategy(Box::new(inf));
         }
         _ => {
