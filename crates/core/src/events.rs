@@ -45,6 +45,8 @@ pub enum EventPayload {
     RiskAlert(RiskAlert),
     /// Periodic latency snapshot emitted by the strategy runner.
     LatencyReport(LatencyReport),
+    /// ML model prediction logged by InferenceStrategy.
+    MLPrediction(MLPrediction),
 }
 
 /// Periodic latency snapshot emitted by the strategy runner.
@@ -54,6 +56,19 @@ pub struct LatencyReport {
     pub p99_ns: u64,
     pub p999_ns: u64,
     pub count: u64,
+}
+
+/// ML model prediction logged by InferenceStrategy on every inference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MLPrediction {
+    pub symbol: Symbol,
+    pub timestamp: Timestamp,
+    /// Feature vector at prediction time (up to 10 elements; unused slots are 0.0).
+    pub features: [f32; 10],
+    pub sell_prob: f32,
+    pub buy_prob: f32,
+    /// -1 = SELL, 0 = HOLD, 1 = BUY
+    pub decision: i8,
 }
 
 /// Maximum number of levels stored inline in a `BookUpdate`.

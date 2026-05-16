@@ -238,6 +238,34 @@ impl Window for Macd {
     }
 }
 
+/// Exponential ATR (Average True Range proxy using bid/ask spread as range).
+///
+/// Uses EMA smoothing on the spread value, normalised by caller (÷ mid_price).
+#[derive(Debug, Clone)]
+pub struct Atr {
+    ema: Ema,
+}
+
+impl Atr {
+    pub fn new(window_size: usize) -> Self {
+        Self { ema: Ema::new(window_size) }
+    }
+}
+
+impl Window for Atr {
+    fn update(&mut self, spread: Decimal) -> Option<Decimal> {
+        self.ema.update(spread)
+    }
+
+    fn value(&self) -> Option<Decimal> {
+        self.ema.value()
+    }
+
+    fn reset(&mut self) {
+        self.ema.reset();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

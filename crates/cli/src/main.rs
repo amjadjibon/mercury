@@ -88,6 +88,25 @@ enum Commands {
         strategy: String,
     },
 
+    /// Generate a labeled ML training dataset from a Parquet tick file
+    Dataset {
+        /// Input Parquet file (recorded with the `record` command)
+        #[arg(short, long)]
+        file: PathBuf,
+
+        /// Output CSV file path
+        #[arg(short, long, default_value = "labels.csv")]
+        output: PathBuf,
+
+        /// Number of book-update ticks to look ahead for labelling
+        #[arg(long, default_value = "10")]
+        lookahead: usize,
+
+        /// Fractional price-move threshold for BUY/SELL labels (e.g. 0.0005 = 5 bps)
+        #[arg(long, default_value = "0.0005")]
+        threshold: f64,
+    },
+
     /// Record live market data to a Parquet file
     Record {
         /// Trading symbol (e.g., BTCUSDT)
@@ -133,6 +152,9 @@ async fn main() -> Result<()> {
             model_path,
         } => {
             run_trading(symbols, exchange, strategy, paper, api_key, secret_key, okx_passphrase, model_path).await?;
+        }
+        Commands::Dataset { file, output, lookahead, threshold } => {
+            run_dataset(file, output, lookahead, threshold).await?;
         }
         Commands::Replay { file, speed } => {
             run_replay(file, speed).await?;
@@ -446,6 +468,7 @@ async fn run_trading(
                 symbol.as_str(),
                 dec!(0.1),
                 model_path.as_deref(),
+                Some(Arc::clone(&event_bus)),
             );
             strategy_runner.add_strategy(Box::new(inf));
         }
@@ -516,6 +539,20 @@ async fn run_trading(
     event_bus.close();
     let _ = strategy_handle.join();
 
+    Ok(())
+}
+
+async fn run_dataset(file: PathBuf, output: PathBuf, lookahead: usize, threshold: f64) -> Result<()> {
+    info!(
+        file = %file.display(),
+        output = %output.display(),
+        lookahead,
+        threshold,
+        "Generating ML training dataset"
+    );
+    let rows = mercury_replay::generate_dataset(file, output.clone(), lookahead, threshold).await?;
+    info!(rows, output = %output.display(), "Dataset written");
+    println!("Wrote {} labeled rows to {}", rows, output.display());
     Ok(())
 }
 

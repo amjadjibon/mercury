@@ -2629,8 +2629,11 @@ dependencies = [
 name = "mercury-replay"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "arrow",
+ "csv",
  "mercury-core",
+ "mercury-strategy",
  "parquet",
  "rust_decimal",
  "rust_decimal_macros",

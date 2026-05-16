@@ -151,6 +151,7 @@ impl EventExt for Event {
             EventPayload::Fill(_) => "fill".to_string(),
             EventPayload::RiskAlert(_) => "risk_alert".to_string(),
             EventPayload::LatencyReport(_) => "latency_report".to_string(),
+            EventPayload::MLPrediction(_) => "ml_prediction".to_string(),
         }
     }
 
@@ -163,6 +164,7 @@ impl EventExt for Event {
             EventPayload::Fill(f) => Some(f.symbol.as_str().to_string()),
             EventPayload::RiskAlert(_) => None,
             EventPayload::LatencyReport(_) => None,
+            EventPayload::MLPrediction(p) => Some(p.symbol.as_str().to_string()),
         }
     }
 

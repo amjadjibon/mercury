@@ -1,6 +1,6 @@
 use crate::models::TradeModel;
 use anyhow::Result;
-use mercury_core::{Event, EventPayload, Fill, Signal};
+use mercury_core::{Event, EventPayload, Fill, MLPrediction, Signal};
 use rust_decimal::prelude::ToPrimitive;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
@@ -56,6 +56,11 @@ impl StorageManager {
                     }
                 }
             }
+            EventPayload::MLPrediction(pred) => {
+                if let Err(e) = self.store_ml_prediction(pred).await {
+                    error!("Failed to store ML prediction: {}", e);
+                }
+            }
             _ => {}
         }
     }
@@ -100,6 +105,35 @@ impl StorageManager {
         .bind(p99_ns as i64)
         .bind(p999_ns as i64)
         .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn store_ml_prediction(&self, pred: &MLPrediction) -> Result<()> {
+        let f = &pred.features;
+        sqlx::query(
+            r#"
+            INSERT INTO feature_snapshots
+                (timestamp, symbol, f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, sell_prob, buy_prob, decision)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(pred.timestamp as i64)
+        .bind(pred.symbol.as_str())
+        .bind(f[0] as f64)
+        .bind(f[1] as f64)
+        .bind(f[2] as f64)
+        .bind(f[3] as f64)
+        .bind(f[4] as f64)
+        .bind(f[5] as f64)
+        .bind(f[6] as f64)
+        .bind(f[7] as f64)
+        .bind(f[8] as f64)
+        .bind(f[9] as f64)
+        .bind(pred.sell_prob as f64)
+        .bind(pred.buy_prob as f64)
+        .bind(pred.decision as i64)
         .execute(&self.pool)
         .await?;
         Ok(())

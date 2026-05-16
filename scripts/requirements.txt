@@ -1,0 +1,4 @@
+scikit-learn>=1.4
+skl2onnx>=1.16
+pandas>=2.0
+numpy>=1.26
