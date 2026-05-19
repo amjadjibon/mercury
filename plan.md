@@ -31,11 +31,11 @@ This file tracks what comes next.
 
 - [x] **TWAP/VWAP slicer** — split a large signal into N child orders over T seconds, paced by volume. Add `TwapExecutor` in `crates/execution/src/twap.rs`. Takes a `Signal` + `duration_secs` + `slices` and emits child signals on a timer.
 
-- [ ] **Post-only / maker-rebate mode** — set `post_only=true` on limit orders to earn maker rebate instead of paying taker fee. Add `time_in_force: TimeInForce::PostOnly` variant in `crates/core/src/types.rs` and wire into gateway order payloads.
+- [x] **Post-only / maker-rebate mode** — set post-only limit orders to earn maker rebate instead of paying taker fee. `TimeInForce::PostOnly` is wired through `Signal`, `OrderManager`, and gateway order payloads.
 
 - [ ] **Peg orders** — re-quote at `best_bid ± tick` on every book update instead of cancel/replace. MarketMaker currently does cancel-replace; add a `peg_mode` flag that only re-quotes when the best price moves. File: `crates/strategy/src/market_maker.rs`.
 
-- [ ] **IOC / FOK time-in-force** — Immediate-Or-Cancel and Fill-Or-Kill needed for taker momentum strategies. Add variants to `TimeInForce` enum in `crates/core/src/types.rs`, wire through Binance/OKX/Bybit gateways.
+- [x] **IOC / FOK time-in-force** — Immediate-Or-Cancel and Fill-Or-Kill needed for taker momentum strategies. TIF now flows from `Signal` to `Order`; Binance, OKX, Bybit, Coinbase, and Kraken map it in order payloads.
 
 - [ ] **Liquidity detection (probing)** — send a small resting limit order 1 tick inside the spread; if filled quickly, infer a hidden iceberg and scale in. Track probe fills separately in `OrderManager`. Add `LiquidityProber` in `crates/execution/src/probe.rs`.
 
@@ -103,7 +103,7 @@ This file tracks what comes next.
 10. ~~Volume prediction + Almgren-Chriss impact (dependency chain)~~ ✅
 11. ~~Inventory skew wired to MarketMaker~~ ✅
 12. ~~Correlation-aware position limits~~ ✅
-13. IOC/FOK + Post-only TIF
+13. ~~IOC/FOK + Post-only TIF~~ ✅
 14. Queue position / fill probability
 15. Spoofing / iceberg detection
 16. Spread decomposition (TUI metric)
@@ -138,7 +138,7 @@ This file tracks what comes next.
 | Price Impact (Almgren-Chriss) | ✅ pre-trade risk check |
 | Inventory Skew | ✅ RiskManager skew wired to MarketMaker |
 | Correlation Position Limits | ✅ correlation-weighted portfolio delta |
-| IOC / FOK / Post-only | 📋 #13 |
+| IOC / FOK / Post-only | ✅ TIF carried through signals and gateways |
 | Queue / Fill Probability | 📋 #14 |
 | Iceberg / Spoofing Detection | 📋 #15 |
 | Spread Decomposition | 📋 #16 |

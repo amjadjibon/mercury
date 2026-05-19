@@ -200,6 +200,8 @@ pub struct Signal {
     pub quantity: FixedPoint,
     pub strategy: StrategyId,
     #[serde(default)]
+    pub time_in_force: TimeInForce,
+    #[serde(default)]
     pub cancel_replace: bool,
 }
 

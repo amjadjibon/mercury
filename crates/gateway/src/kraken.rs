@@ -162,6 +162,12 @@ impl ExchangeGateway for KrakenGateway {
         if let Some(price) = order.price {
             params.push(("price", price.to_string()));
         }
+        match order.time_in_force {
+            TimeInForce::GTC => {}
+            TimeInForce::IOC => params.push(("timeinforce", "IOC".to_string())),
+            TimeInForce::FOK => params.push(("timeinforce", "FOK".to_string())),
+            TimeInForce::PostOnly => params.push(("oflags", "post".to_string())),
+        }
 
         info!(symbol = %order.symbol, side = side, "Submitting Kraken order");
 

@@ -67,6 +67,7 @@ mod tests {
             quantity: qty.into(),
             strategy: StrategyId::Momentum,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         }
     }
 

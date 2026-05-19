@@ -67,6 +67,7 @@ impl Strategy for RsiStrategy {
                     quantity: FixedPoint::from_decimal(self.quantity),
                     strategy: self.id(),
                     cancel_replace: false,
+                    time_in_force: mercury_core::TimeInForce::IOC,
                 }];
             }
 
@@ -81,6 +82,7 @@ impl Strategy for RsiStrategy {
                     quantity: FixedPoint::from_decimal(self.quantity),
                     strategy: self.id(),
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 }];
             }
         }

@@ -340,6 +340,8 @@ pub enum TimeInForce {
     IOC,
     /// Fill or kill
     FOK,
+    /// Rest only; reject if it would immediately match.
+    PostOnly,
 }
 
 impl Default for TimeInForce {

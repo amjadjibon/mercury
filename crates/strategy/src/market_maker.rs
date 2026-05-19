@@ -249,6 +249,7 @@ impl Strategy for MarketMaker {
                 quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: true,
+                time_in_force: mercury_core::TimeInForce::PostOnly,
             },
             Signal {
                 symbol: book.symbol,
@@ -258,6 +259,7 @@ impl Strategy for MarketMaker {
                 quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: true,
+                time_in_force: mercury_core::TimeInForce::PostOnly,
             },
         ]
     }
@@ -325,6 +327,8 @@ mod tests {
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].side, Side::Buy);
         assert_eq!(signals[1].side, Side::Sell);
+        assert_eq!(signals[0].time_in_force, mercury_core::TimeInForce::PostOnly);
+        assert_eq!(signals[1].time_in_force, mercury_core::TimeInForce::PostOnly);
         assert!(
             signals[0].price.unwrap() < signals[1].price.unwrap(),
             "bid < ask"

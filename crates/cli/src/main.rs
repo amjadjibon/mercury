@@ -715,7 +715,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
                 order_type: signal.order_type,
                 price: signal.price,
                 quantity: signal.quantity,
-                time_in_force: mercury_core::TimeInForce::GTC,
+                time_in_force: signal.time_in_force,
                 created_at: mercury_core::types::now_nanos(),
             };
             match exchange.submit_order(order) {

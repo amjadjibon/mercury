@@ -82,6 +82,7 @@ impl Strategy for Momentum {
                 quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             }];
         } else if momentum < -self.threshold && self.position >= Decimal::ZERO {
             return vec![Signal {
@@ -92,6 +93,7 @@ impl Strategy for Momentum {
                 quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             }];
         }
 
@@ -105,6 +107,7 @@ impl Strategy for Momentum {
                 quantity: FixedPoint::from_decimal(self.position),
                 strategy: self.id(),
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             }];
         } else if momentum > Decimal::ZERO && self.position < Decimal::ZERO {
             return vec![Signal {
@@ -115,6 +118,7 @@ impl Strategy for Momentum {
                 quantity: FixedPoint::from_decimal(self.position.abs()),
                 strategy: self.id(),
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             }];
         }
 

@@ -26,6 +26,15 @@ impl BybitConfig {
     }
 }
 
+fn bybit_time_in_force(time_in_force: TimeInForce) -> &'static str {
+    match time_in_force {
+        TimeInForce::GTC => "GTC",
+        TimeInForce::IOC => "IOC",
+        TimeInForce::FOK => "FOK",
+        TimeInForce::PostOnly => "PostOnly",
+    }
+}
+
 pub struct BybitGateway {
     config: BybitConfig,
     client: Client,
@@ -141,7 +150,7 @@ impl ExchangeGateway for BybitGateway {
 
         if let Some(price) = order.price {
             body["price"] = serde_json::Value::String(price.to_string());
-            body["timeInForce"] = serde_json::Value::String("GTC".to_string());
+            body["timeInForce"] = serde_json::Value::String(bybit_time_in_force(order.time_in_force).to_string());
         }
 
         let body_str = body.to_string();

@@ -536,6 +536,7 @@ mod tests {
             quantity: dec!(0.2).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -616,6 +617,7 @@ mod tests {
             quantity: dec!(0.1).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -640,6 +642,7 @@ mod tests {
             quantity: dec!(100).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -663,6 +666,7 @@ mod tests {
             quantity: dec!(1).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(manager.check(&signal).is_ok());
@@ -713,6 +717,7 @@ mod tests {
             quantity: dec!(0.7).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -743,6 +748,7 @@ mod tests {
             quantity: dec!(0.7).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(manager.check(&signal).is_ok());

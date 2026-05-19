@@ -82,7 +82,7 @@ impl OrderManager {
             order_type: signal.order_type,
             price: signal.price,
             quantity: signal.quantity,
-            time_in_force: mercury_core::TimeInForce::GTC,
+            time_in_force: signal.time_in_force,
             created_at: now_nanos(),
         };
 
@@ -305,7 +305,7 @@ mod tests {
                     order_type: signal.order_type,
                     price: signal.price,
                     quantity: signal.quantity,
-                    time_in_force: mercury_core::TimeInForce::GTC,
+                    time_in_force: signal.time_in_force,
                     created_at: 0,
                 };
                 exchange.submit_order(order);

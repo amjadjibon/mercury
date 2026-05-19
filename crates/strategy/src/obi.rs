@@ -76,6 +76,7 @@ impl Strategy for ObiStrategy {
                 quantity: self.order_size,
                 strategy: StrategyId::Obi,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             }];
         }
 
@@ -91,6 +92,7 @@ impl Strategy for ObiStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Obi,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 }];
             } else if imb < -self.entry_threshold {
                 self.position = -1;
@@ -102,6 +104,7 @@ impl Strategy for ObiStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Obi,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 }];
             }
         }

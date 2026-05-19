@@ -64,6 +64,7 @@ impl ArbitrageStrategy {
                             order_type: OrderType::Limit,
                             strategy: self.id(),
                             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                         },
                         Signal {
                             symbol: self.symbol,
@@ -73,6 +74,7 @@ impl ArbitrageStrategy {
                             order_type: OrderType::Limit,
                             strategy: self.id(),
                             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                         },
                     ];
                 }

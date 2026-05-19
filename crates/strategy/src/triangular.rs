@@ -138,6 +138,7 @@ impl TriangularStrategy {
                 quantity: self.eth_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
             // Leg 2: sell ETH for BTC
             Signal {
@@ -148,6 +149,7 @@ impl TriangularStrategy {
                 quantity: self.eth_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
             // Leg 3: sell BTC for USDT
             Signal {
@@ -158,6 +160,7 @@ impl TriangularStrategy {
                 quantity: btc_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
         ]
     }
@@ -175,6 +178,7 @@ impl TriangularStrategy {
                 quantity: btc_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
             // Leg 2: buy ETH with BTC
             Signal {
@@ -185,6 +189,7 @@ impl TriangularStrategy {
                 quantity: self.eth_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
             // Leg 3: sell ETH for USDT
             Signal {
@@ -195,6 +200,7 @@ impl TriangularStrategy {
                 quantity: self.eth_qty,
                 strategy: StrategyId::Triangular,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
         ]
     }

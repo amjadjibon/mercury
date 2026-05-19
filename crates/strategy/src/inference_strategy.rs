@@ -150,6 +150,7 @@ impl Strategy for InferenceStrategy {
                 quantity: FixedPoint::from_decimal(self.quantity),
                 strategy: StrategyId::Inference,
                 cancel_replace: true,
+                time_in_force: mercury_core::TimeInForce::GTC,
             }],
             -1 => vec![Signal {
                 symbol: self.symbol,
@@ -159,6 +160,7 @@ impl Strategy for InferenceStrategy {
                 quantity: FixedPoint::from_decimal(self.quantity),
                 strategy: StrategyId::Inference,
                 cancel_replace: true,
+                time_in_force: mercury_core::TimeInForce::GTC,
             }],
             _ => vec![],
         }

@@ -47,6 +47,14 @@ impl BinanceConfig {
     }
 }
 
+fn binance_time_in_force(time_in_force: TimeInForce) -> &'static str {
+    match time_in_force {
+        TimeInForce::GTC | TimeInForce::PostOnly => "GTC",
+        TimeInForce::IOC => "IOC",
+        TimeInForce::FOK => "FOK",
+    }
+}
+
 /// Binance exchange gateway.
 pub struct BinanceGateway {
     config: BinanceConfig,
@@ -263,7 +271,11 @@ impl ExchangeGateway for BinanceGateway {
     async fn submit_order(&self, order: &Order) -> GatewayResult<OrderId> {
         let url = format!("{}/api/v3/order", self.config.base_url());
         let side = match order.side { Side::Buy => "BUY", Side::Sell => "SELL" };
-        let order_type = match order.order_type { OrderType::Limit => "LIMIT", OrderType::Market => "MARKET" };
+        let order_type = match (order.order_type, order.time_in_force) {
+            (OrderType::Limit, TimeInForce::PostOnly) => "LIMIT_MAKER",
+            (OrderType::Limit, _) => "LIMIT",
+            (OrderType::Market, _) => "MARKET",
+        };
         let timestamp = self.server_time().await?;
 
         let mut params: Vec<(&str, String)> = vec![
@@ -275,7 +287,9 @@ impl ExchangeGateway for BinanceGateway {
         ];
         if let Some(price) = order.price {
             params.push(("price", price.to_string()));
-            params.push(("timeInForce", "GTC".to_string()));
+            if order.order_type == OrderType::Limit && order.time_in_force != TimeInForce::PostOnly {
+                params.push(("timeInForce", binance_time_in_force(order.time_in_force).to_string()));
+            }
         }
 
         let signed = self.sign_query(&params);

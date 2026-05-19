@@ -150,6 +150,7 @@ mod tests {
             quantity: dec!(0.5).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(check_position_limit(dec!(0.6), &signal, dec!(1.0)).is_err());
@@ -166,6 +167,7 @@ mod tests {
             quantity: dec!(0.5).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(check_position_limit(dec!(-0.6), &signal, dec!(1.0)).is_err());

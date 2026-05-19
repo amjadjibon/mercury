@@ -110,13 +110,33 @@ impl ExchangeGateway for CoinbaseGateway {
         let order_config = match order.order_type {
             OrderType::Limit => {
                 let price = order.price.unwrap_or(mercury_core::FixedPoint::ZERO).to_string();
-                serde_json::json!({
-                    "limit_limit_gtc": {
-                        "base_size": order.quantity.to_string(),
-                        "limit_price": price,
-                        "post_only": false
+                match order.time_in_force {
+                    TimeInForce::GTC | TimeInForce::PostOnly => {
+                        serde_json::json!({
+                            "limit_limit_gtc": {
+                                "base_size": order.quantity.to_string(),
+                                "limit_price": price,
+                                "post_only": order.time_in_force == TimeInForce::PostOnly
+                            }
+                        })
                     }
-                })
+                    TimeInForce::FOK => {
+                        serde_json::json!({
+                            "limit_limit_fok": {
+                                "base_size": order.quantity.to_string(),
+                                "limit_price": price
+                            }
+                        })
+                    }
+                    TimeInForce::IOC => {
+                        serde_json::json!({
+                            "sor_limit_ioc": {
+                                "base_size": order.quantity.to_string(),
+                                "limit_price": price
+                            }
+                        })
+                    }
+                }
             }
             OrderType::Market => {
                 serde_json::json!({

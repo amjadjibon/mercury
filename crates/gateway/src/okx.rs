@@ -174,9 +174,12 @@ impl ExchangeGateway for OkxGateway {
             Side::Buy => "buy",
             Side::Sell => "sell",
         };
-        let ord_type = match order.order_type {
-            OrderType::Limit => "limit",
-            OrderType::Market => "market",
+        let ord_type = match (order.order_type, order.time_in_force) {
+            (OrderType::Limit, TimeInForce::GTC) => "limit",
+            (OrderType::Limit, TimeInForce::IOC) => "ioc",
+            (OrderType::Limit, TimeInForce::FOK) => "fok",
+            (OrderType::Limit, TimeInForce::PostOnly) => "post_only",
+            (OrderType::Market, _) => "market",
         };
 
         let mut body = serde_json::json!({

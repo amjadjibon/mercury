@@ -169,6 +169,7 @@ impl PairsStrategy {
                 quantity: self.order_size,
                 strategy: StrategyId::Pairs,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
             Signal {
                 symbol: self.symbol_x,
@@ -178,6 +179,7 @@ impl PairsStrategy {
                 quantity: self.order_size,
                 strategy: StrategyId::Pairs,
                 cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
             },
         ]
     }
@@ -196,6 +198,7 @@ impl PairsStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Pairs,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 },
                 Signal {
                     symbol: self.symbol_x,
@@ -205,6 +208,7 @@ impl PairsStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Pairs,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 },
             ],
             // Close short spread: buy Y, sell X.
@@ -217,6 +221,7 @@ impl PairsStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Pairs,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 },
                 Signal {
                     symbol: self.symbol_x,
@@ -226,6 +231,7 @@ impl PairsStrategy {
                     quantity: self.order_size,
                     strategy: StrategyId::Pairs,
                     cancel_replace: false,
+                time_in_force: mercury_core::TimeInForce::IOC,
                 },
             ],
         }
