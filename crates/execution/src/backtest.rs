@@ -110,8 +110,8 @@ impl SimulatedExchange {
 
     pub fn on_book_update(&mut self, update: &BookUpdate) -> Vec<Fill> {
         self.book.apply_update(update);
-        let best_bid = self.book.best_bid().map(|l| l.price).unwrap_or_default();
-        let best_ask = self.book.best_ask().map(|l| l.price).unwrap_or(Decimal::MAX);
+        let best_bid = self.book.best_bid().map(|l| l.price.to_decimal()).unwrap_or_default();
+        let best_ask = self.book.best_ask().map(|l| l.price.to_decimal()).unwrap_or(Decimal::MAX);
         let mut fills = Vec::new();
         fills.extend(self.match_orders(Side::Buy, best_ask));
         fills.extend(self.match_orders(Side::Sell, best_bid));

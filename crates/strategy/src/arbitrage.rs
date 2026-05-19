@@ -93,8 +93,8 @@ impl Strategy for ArbitrageStrategy {
             return vec![];
         }
 
-        let best_bid = book.best_bid().map(|l| l.price).unwrap_or(Decimal::ZERO);
-        let best_ask = book.best_ask().map(|l| l.price).unwrap_or(Decimal::ZERO);
+        let best_bid = book.best_bid().map(|l| l.price.to_decimal()).unwrap_or(Decimal::ZERO);
+        let best_ask = book.best_ask().map(|l| l.price.to_decimal()).unwrap_or(Decimal::ZERO);
         self.bbo_cache.insert(book.exchange, (best_bid, best_ask));
 
         if self.has_pending() {

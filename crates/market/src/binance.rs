@@ -1,7 +1,7 @@
 //! Binance WebSocket feed parser.
 
 use crate::parser::{FeedMessage, FeedParser, ParseError};
-use mercury_core::{BookUpdate, Exchange, Level, Side, Symbol, Trade};
+use mercury_core::{BookUpdate, Exchange, FixedPoint, Level, Side, Symbol, Trade};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -106,8 +106,8 @@ impl BinanceParser {
     }
 
     fn parse_level(&self, level: &[String; 2]) -> Option<Level> {
-        let price = Decimal::from_str(&level[0]).ok()?;
-        let quantity = Decimal::from_str(&level[1]).ok()?;
+        let price = FixedPoint::from_str(&level[0])?;
+        let quantity = FixedPoint::from_str(&level[1])?;
         Some(Level::new(price, quantity))
     }
 }

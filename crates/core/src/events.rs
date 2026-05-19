@@ -97,7 +97,7 @@ impl BookUpdate {
         sequence: u64,
         is_snapshot: bool,
     ) -> Self {
-        let zero = Level::new(Price::ZERO, Quantity::ZERO);
+        let zero = Level::new(FixedPoint::ZERO, FixedPoint::ZERO);
         let mut bid_arr = [zero; MAX_LEVELS];
         let bid_count = bids.len().min(MAX_LEVELS);
         bid_arr[..bid_count].copy_from_slice(&bids[..bid_count]);
@@ -129,16 +129,21 @@ impl BookUpdate {
     }
 }
 
-/// Price level in the order book.
+/// Price level in the order book — uses `FixedPoint` for i64 arithmetic on the hot path.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Level {
-    pub price: Price,
-    pub quantity: Quantity,
+    pub price: FixedPoint,
+    pub quantity: FixedPoint,
 }
 
 impl Level {
-    pub fn new(price: Price, quantity: Quantity) -> Self {
-        Self { price, quantity }
+    /// Accepts anything convertible to `FixedPoint`, including `Decimal` literals (`dec!(...)`)
+    /// and `FixedPoint` values directly — all existing call sites compile unchanged.
+    pub fn new(price: impl Into<FixedPoint>, quantity: impl Into<FixedPoint>) -> Self {
+        Self {
+            price: price.into(),
+            quantity: quantity.into(),
+        }
     }
 }
 

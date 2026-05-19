@@ -67,8 +67,8 @@ impl PaperGateway {
                     Some(event) = event_rx.recv() => {
                         match event.payload {
                             EventPayload::BookUpdate(update) => {
-                                let best_bid = update.bids.first().map(|l| l.price).unwrap_or_default();
-                                let best_ask = update.asks.first().map(|l| l.price).unwrap_or(Decimal::MAX);
+                                let best_bid = update.bids.first().map(|l| l.price.to_decimal()).unwrap_or_default();
+                                let best_ask = update.asks.first().map(|l| l.price.to_decimal()).unwrap_or(Decimal::MAX);
 
                                 current_bids.insert(update.symbol.clone(), best_bid);
                                 current_asks.insert(update.symbol.clone(), best_ask);

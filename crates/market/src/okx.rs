@@ -1,7 +1,7 @@
 //! OKX WebSocket feed parser.
 
 use crate::parser::{FeedMessage, FeedParser, ParseError};
-use mercury_core::{BookUpdate, Exchange, Level, Side, Symbol, Trade};
+use mercury_core::{BookUpdate, Exchange, FixedPoint, Level, Side, Symbol, Trade};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -113,8 +113,8 @@ fn parse_levels(raw: &[Vec<String>]) -> Vec<Level> {
             if row.len() < 2 {
                 return None;
             }
-            let price = Decimal::from_str(&row[0]).ok()?;
-            let qty = Decimal::from_str(&row[1]).ok()?;
+            let price = FixedPoint::from_str(&row[0])?;
+            let qty = FixedPoint::from_str(&row[1])?;
             Some(Level::new(price, qty))
         })
         .collect()

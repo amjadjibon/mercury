@@ -21,7 +21,7 @@ This file tracks what comes next.
 
 ## Execution Quality
 
-- [ ] **TWAP/VWAP slicer** — split a large signal into N child orders over T seconds, paced by volume. Add `TwapExecutor` in `crates/execution/src/twap.rs`. Takes a `Signal` + `duration_secs` + `slices` and emits child signals on a timer.
+- [x] **TWAP/VWAP slicer** — split a large signal into N child orders over T seconds, paced by volume. Add `TwapExecutor` in `crates/execution/src/twap.rs`. Takes a `Signal` + `duration_secs` + `slices` and emits child signals on a timer.
 
 - [ ] **Post-only / maker-rebate mode** — set `post_only=true` on limit orders to earn maker rebate instead of paying taker fee. Add `time_in_force: TimeInForce::PostOnly` variant in `crates/core/src/types.rs` and wire into gateway order payloads.
 
@@ -84,9 +84,9 @@ This file tracks what comes next.
 ## Priority order
 
 1. ~~Inventory skew → Avellaneda-Stoikov~~ ✅
-2. Kelly sizing + intraday trailing drawdown (risk hygiene before live)
-3. Realised volatility estimator (required by #1 and #2)
-4. WebSocket fill delivery (required before any live trading)
-5. TWAP slicer (needed for larger position sizes)
+2. ~~Kelly sizing + intraday trailing drawdown~~ ✅
+3. ~~Realised volatility estimator~~ ✅
+4. ~~WebSocket fill delivery~~ ✅
+5. ~~TWAP slicer~~ ✅
 6. `i64` fixed-point (biggest remaining latency win)
 7. Pairs stat-arb (new alpha source)

@@ -96,15 +96,13 @@ pub struct DepthWidget {
 
 impl DepthWidget {
     pub fn new(bids: &[mercury_core::Level], asks: &[mercury_core::Level]) -> Self {
-        use rust_decimal::prelude::ToPrimitive;
-
         let mut bid_points: Vec<(f64, f64)> = Vec::with_capacity(bids.len());
         let mut cum: f64 = 0.0;
         for level in bids.iter() {
-            if let (Some(p), Some(q)) = (level.price.to_f64(), level.quantity.to_f64()) {
-                cum += q;
-                bid_points.push((p, cum));
-            }
+            let p = level.price.to_f64();
+            let q = level.quantity.to_f64();
+            cum += q;
+            bid_points.push((p, cum));
         }
         // Bids arrive high→low; reverse so the line plots left-to-right
         bid_points.reverse();
@@ -112,10 +110,10 @@ impl DepthWidget {
         let mut ask_points: Vec<(f64, f64)> = Vec::with_capacity(asks.len());
         cum = 0.0;
         for level in asks.iter() {
-            if let (Some(p), Some(q)) = (level.price.to_f64(), level.quantity.to_f64()) {
-                cum += q;
-                ask_points.push((p, cum));
-            }
+            let p = level.price.to_f64();
+            let q = level.quantity.to_f64();
+            cum += q;
+            ask_points.push((p, cum));
         }
 
         let x_min = bid_points.first().map(|(p, _)| *p).unwrap_or(0.0);

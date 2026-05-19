@@ -46,8 +46,8 @@ impl SmartOrderRouter {
     }
 
     fn update_bbo(&self, update: &BookUpdate) {
-        let best_bid = update.bids.first().map(|l| l.price).unwrap_or_default();
-        let best_ask = update.asks.first().map(|l| l.price).unwrap_or_default();
+        let best_bid = update.bids.first().map(|l| l.price.to_decimal()).unwrap_or_default();
+        let best_ask = update.asks.first().map(|l| l.price.to_decimal()).unwrap_or_default();
 
         if best_bid.is_zero() && best_ask.is_zero() {
             return;

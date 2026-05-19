@@ -1,7 +1,7 @@
 //! Coinbase Advanced Trade WebSocket feed parser.
 
 use crate::parser::{FeedMessage, FeedParser, ParseError};
-use mercury_core::{BookUpdate, Exchange, Level, Side, Symbol, Trade};
+use mercury_core::{BookUpdate, Exchange, FixedPoint, Level, Side, Symbol, Trade};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::str::FromStr;
@@ -116,8 +116,8 @@ impl CoinbaseParser {
                 }
 
                 let level = Level::new(
-                    Decimal::from_str(&change.price_level).unwrap_or_default(),
-                    Decimal::from_str(&change.new_quantity).unwrap_or_default(),
+                    FixedPoint::from_str(&change.price_level).unwrap_or(FixedPoint::ZERO),
+                    FixedPoint::from_str(&change.new_quantity).unwrap_or(FixedPoint::ZERO),
                 );
 
                 if change.side == "bid" {

@@ -5,7 +5,7 @@
 //! no pointer chasing, vs. BTreeMap's B-tree node traversal.
 
 use crate::events::{BookUpdate, Level};
-use crate::types::{Exchange, Price, Quantity, Symbol};
+use crate::types::{Exchange, FixedPoint, Price, Quantity, Symbol};
 use rust_decimal::Decimal;
 
 /// L2 Order Book maintaining price levels.
@@ -51,7 +51,9 @@ impl OrderBook {
 
         // Recompute cached mid after every update.
         self.cached_mid = match (self.bids.first(), self.asks.first()) {
-            (Some(bid), Some(ask)) => Some((bid.price + ask.price) / Decimal::TWO),
+            (Some(bid), Some(ask)) => {
+                Some((bid.price.to_decimal() + ask.price.to_decimal()) / Decimal::TWO)
+            }
             _ => None,
         };
     }
@@ -70,7 +72,7 @@ impl OrderBook {
 
     pub fn spread(&self) -> Option<Price> {
         match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => Some(ask.price - bid.price),
+            (Some(bid), Some(ask)) => Some(ask.price.to_decimal() - bid.price.to_decimal()),
             _ => None,
         }
     }
@@ -93,24 +95,26 @@ impl OrderBook {
     }
 
     pub fn bid_depth(&self, up_to_price: Price) -> Quantity {
+        let threshold = FixedPoint::from_decimal(up_to_price);
         self.bids
             .iter()
-            .filter(|l| l.price >= up_to_price)
-            .map(|l| l.quantity)
+            .filter(|l| l.price >= threshold)
+            .map(|l| l.quantity.to_decimal())
             .sum()
     }
 
     pub fn ask_depth(&self, up_to_price: Price) -> Quantity {
+        let threshold = FixedPoint::from_decimal(up_to_price);
         self.asks
             .iter()
-            .filter(|l| l.price <= up_to_price)
-            .map(|l| l.quantity)
+            .filter(|l| l.price <= threshold)
+            .map(|l| l.quantity.to_decimal())
             .sum()
     }
 
     pub fn is_valid(&self) -> bool {
         match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => bid.price < ask.price,
+            (Some(bid), Some(ask)) => bid.price < ask.price, // FixedPoint: Ord
             _ => true,
         }
     }

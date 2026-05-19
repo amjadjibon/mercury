@@ -108,7 +108,7 @@ impl FeatureComputer {
 
         // Feature 0: order imbalance at top of book
         let (bb_qty, ba_qty) = match (book.best_bid(), book.best_ask()) {
-            (Some(b), Some(a)) => (b.quantity, a.quantity),
+            (Some(b), Some(a)) => (b.quantity.to_decimal(), a.quantity.to_decimal()),
             _ => return None,
         };
         let total_top = bb_qty + ba_qty;
@@ -134,8 +134,8 @@ impl FeatureComputer {
         let macd_feature = macd_sign * macd_mag;
 
         // Feature 4: depth ratio top-5
-        let bid_depth: Decimal = book.top_bids(5).iter().map(|l| l.quantity).sum();
-        let ask_depth: Decimal = book.top_asks(5).iter().map(|l| l.quantity).sum();
+        let bid_depth: Decimal = book.top_bids(5).iter().map(|l| l.quantity.to_decimal()).sum();
+        let ask_depth: Decimal = book.top_asks(5).iter().map(|l| l.quantity.to_decimal()).sum();
         let total_depth = bid_depth + ask_depth;
         let depth_ratio = if total_depth.is_zero() { 0.5f32 } else { to_f32(bid_depth / total_depth) };
 
@@ -156,8 +156,8 @@ impl FeatureComputer {
         // Feature 8: depth slope (bid_qty[0] - bid_qty[4]) normalised by mid
         let bids = book.top_bids(5);
         let depth_slope = if bids.len() >= 2 {
-            let top_qty = bids[0].quantity;
-            let bot_qty = bids[bids.len() - 1].quantity;
+            let top_qty = bids[0].quantity.to_decimal();
+            let bot_qty = bids[bids.len() - 1].quantity.to_decimal();
             if mid.is_zero() { 0.0f32 } else { to_f32((top_qty - bot_qty) / mid) }
         } else {
             0.0f32
