@@ -69,7 +69,7 @@ This file tracks what comes next.
 
 - [x] **Online learning** — update logistic regression weights incrementally with each new labeled tick (SGD). `OnlineClassifier` in `crates/strategy/src/inference_strategy.rs` provides a softmax logistic fallback when no ONNX model is loaded, using delayed book ticks for self-labeling.
 
-- [ ] **Full LOB snapshot as CNN input** — replace 10-scalar feature vector with 20-level bid+ask volume profile fed into a 1D conv net. Requires generating a new ONNX model with input shape `[1, 2, 20]`. Update `FeatureComputer` in `crates/strategy/src/features.rs`.
+- [x] **Full LOB snapshot as CNN input** — add a 20-level bid+ask volume profile for 1D conv net models. `FeatureComputer::compute_lob_snapshot()` returns normalized `[2, 20]` depth, and `InferenceStrategy::new_lob_cnn()` supports ONNX input shape `[1, 2, 20]` while keeping the scalar `[1, 10]` path available.
 
 - [ ] **Reinforcement learning quote placement** — Deep Q-Network agent where action = (spread_width, skew) and reward = PnL - inventory_penalty. Research-grade; needs a simulated environment wrapper around `SimulatedExchange`. Add `crates/strategy/src/rl_strategy.rs`.
 
@@ -112,7 +112,7 @@ This file tracks what comes next.
 19. ~~Liquidity probing~~ ✅
 20. ~~Online learning (ML fallback)~~ ✅
 21. ~~Sentiment / news signal~~ ✅
-22. Full LOB CNN input
+22. ~~Full LOB CNN input~~ ✅
 23. `Arc<BookUpdate>` bus optimization
 24. Feed reconnect tests
 25. `SO_BUSY_POLL` + NIC timestamps (Linux only)
@@ -147,7 +147,7 @@ This file tracks what comes next.
 | Liquidity Detection / Probing | ✅ LiquidityProber quick-fill scale-in |
 | Online Learning (SGD) | ✅ OnlineClassifier fallback |
 | Sentiment / News Signal | ✅ NewsParser + SentimentStrategy |
-| Full LOB CNN | 📋 #22 |
+| Full LOB CNN | ✅ `[1, 2, 20]` LOB input mode |
 | RL Quote Placement (DQN) | 📋 #26 |
 | Quote Stuffing | ❌ unethical/illegal — not implementing |
 | Regulatory Latency Arbitrage | ❌ out of scope |

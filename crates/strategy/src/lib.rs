@@ -18,11 +18,13 @@ pub mod volatility;
 
 pub use arbitrage::ArbitrageStrategy;
 pub use features::{
-    EXTENDED_FEATURE_COUNT, FEATURE_COUNT, FeatureComputer, HawkesIntensity, VolumeEstimator,
+    EXTENDED_FEATURE_COUNT, FEATURE_COUNT, FeatureComputer, HawkesIntensity, LOB_CHANNELS,
+    LOB_LEVELS, VolumeEstimator,
 };
 pub use indicators::{Atr, Ema, Macd, Rsi, Sma, Window};
 pub use inference_strategy::{
-    InferenceStrategy, OnlineClassifier, OnlineClassifierConfig, OnlineLearningConfig,
+    InferenceInputMode, InferenceStrategy, OnlineClassifier, OnlineClassifierConfig,
+    OnlineLearningConfig,
 };
 pub use market_maker::MarketMaker;
 pub use momentum::Momentum;

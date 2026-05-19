@@ -3,7 +3,8 @@
 //! `FeatureComputer` maintains running indicator state and produces a
 //! 10-element `f32` feature vector from each `OrderBook` snapshot and
 //! optionally from `Trade` events for order-flow features. New models can use
-//! `compute_extended()` to include Hawkes trade-arrival intensity as feature 11.
+//! `compute_extended()` to include Hawkes trade-arrival intensity as feature 11,
+//! or `compute_lob_snapshot()` for a `[2, 20]` bid/ask volume profile.
 
 use crate::indicators::{Atr, Ema, Macd, Rsi, Window};
 use mercury_core::{OrderBook, Quantity, Trade};
@@ -14,6 +15,10 @@ use std::collections::VecDeque;
 pub const FEATURE_COUNT: usize = 10;
 /// Number of features when including Hawkes trade-arrival intensity.
 pub const EXTENDED_FEATURE_COUNT: usize = 11;
+/// Bid and ask channels in the LOB CNN input.
+pub const LOB_CHANNELS: usize = 2;
+/// Number of order-book levels per side in the LOB CNN input.
+pub const LOB_LEVELS: usize = 20;
 
 /// Self-exciting Hawkes process intensity for short-term trade arrivals.
 ///
@@ -386,6 +391,41 @@ impl FeatureComputer {
         Some(extended)
     }
 
+    /// Compute a `[2, 20]` LOB volume tensor for CNN models.
+    ///
+    /// Channel 0 is bid quantity from best bid outward. Channel 1 is ask
+    /// quantity from best ask outward. Quantities are normalized by total
+    /// visible top-20 depth across both sides; missing levels are zero-filled.
+    pub fn compute_lob_snapshot(
+        &self,
+        book: &OrderBook,
+    ) -> Option<[[f32; LOB_LEVELS]; LOB_CHANNELS]> {
+        book.best_bid()?;
+        book.best_ask()?;
+
+        let bids = book.top_bids(LOB_LEVELS);
+        let asks = book.top_asks(LOB_LEVELS);
+        let total_depth: Decimal = bids
+            .iter()
+            .chain(asks.iter())
+            .map(|level| level.quantity.to_decimal())
+            .sum();
+
+        let mut tensor = [[0.0f32; LOB_LEVELS]; LOB_CHANNELS];
+        if total_depth.is_zero() {
+            return Some(tensor);
+        }
+
+        for (idx, level) in bids.iter().enumerate() {
+            tensor[0][idx] = to_f32(level.quantity.to_decimal() / total_depth);
+        }
+        for (idx, level) in asks.iter().enumerate() {
+            tensor[1][idx] = to_f32(level.quantity.to_decimal() / total_depth);
+        }
+
+        Some(tensor)
+    }
+
     pub fn reset(&mut self) {
         self.rsi.reset();
         self.macd.reset();
@@ -430,6 +470,26 @@ mod tests {
             1,
             true,
         );
+        let mut book = OrderBook::new(Exchange::Binance, sym);
+        book.apply_update(&upd);
+        book
+    }
+
+    fn make_deep_book() -> OrderBook {
+        let sym = Symbol::new("BTCUSDT");
+        let mut bids = Vec::new();
+        let mut asks = Vec::new();
+        for i in 0..25 {
+            bids.push(Level::new(
+                dec!(50000) - Decimal::from(i),
+                Decimal::from(i + 1),
+            ));
+            asks.push(Level::new(
+                dec!(50001) + Decimal::from(i),
+                Decimal::from(25 - i),
+            ));
+        }
+        let upd = BookUpdate::from_slices(Exchange::Binance, sym, &bids, &asks, 1, true);
         let mut book = OrderBook::new(Exchange::Binance, sym);
         book.apply_update(&upd);
         book
@@ -522,6 +582,31 @@ mod tests {
         let feats = fc.compute_extended(&book).unwrap();
 
         assert_eq!(feats[FEATURE_COUNT], 0.0);
+    }
+
+    #[test]
+    fn test_lob_snapshot_uses_20_levels_per_side() {
+        let fc = FeatureComputer::new();
+        let book = make_deep_book();
+        let tensor = fc.compute_lob_snapshot(&book).unwrap();
+
+        assert_eq!(tensor.len(), LOB_CHANNELS);
+        assert_eq!(tensor[0].len(), LOB_LEVELS);
+        assert!(tensor[0][0] > 0.0);
+        assert!(tensor[1][0] > 0.0);
+        assert_eq!(tensor[0][19] > 0.0, true);
+    }
+
+    #[test]
+    fn test_lob_snapshot_is_depth_normalized() {
+        let fc = FeatureComputer::new();
+        let book = make_book(dec!(50000), dec!(1.0), dec!(50001), dec!(3.0));
+        let tensor = fc.compute_lob_snapshot(&book).unwrap();
+        let sum: f32 = tensor.iter().flat_map(|side| side.iter()).sum();
+
+        assert!((sum - 1.0).abs() < 0.0001, "sum = {sum}");
+        assert!((tensor[0][0] - 0.25).abs() < 0.0001);
+        assert!((tensor[1][0] - 0.75).abs() < 0.0001);
     }
 
     #[test]

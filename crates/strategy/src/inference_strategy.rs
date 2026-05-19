@@ -1,9 +1,10 @@
 //! ONNX-backed inference strategy using tract (pure Rust, no system library).
 //!
-//! Loads a 10-input / 3-output ONNX classifier. Outputs are softmax
-//! probabilities for [SELL, HOLD, BUY]. No model path → online SGD fallback.
+//! Loads either a 10-scalar ONNX classifier or a `[1, 2, 20]` LOB CNN model.
+//! Outputs are softmax probabilities for [SELL, HOLD, BUY]. No model path →
+//! online SGD fallback.
 
-use crate::features::{FEATURE_COUNT, FeatureComputer};
+use crate::features::{FEATURE_COUNT, FeatureComputer, LOB_CHANNELS, LOB_LEVELS};
 use crate::traits::Strategy;
 use mercury_core::{
     Event, EventBus, EventPayload, Fill, FixedPoint, MLPrediction, OrderBook, OrderType, Quantity,
@@ -18,6 +19,15 @@ const SIGNAL_THRESHOLD: f32 = 0.65;
 const ONLINE_SIGNAL_THRESHOLD: f32 = 0.60;
 
 type OnnxPlan = SimplePlan<TypedFact, Box<dyn TypedOp>, Graph<TypedFact, Box<dyn TypedOp>>>;
+
+/// ONNX input shape used by `InferenceStrategy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InferenceInputMode {
+    /// Existing scalar feature vector with input shape `[1, 10]`.
+    ScalarFeatures,
+    /// Full order-book volume profile with input shape `[1, 2, 20]`.
+    LobCnn,
+}
 
 /// SGD settings for the online softmax classifier.
 #[derive(Debug, Clone, Copy)]
@@ -126,6 +136,7 @@ pub struct InferenceStrategy {
     quantity: Quantity,
     features: FeatureComputer,
     model: Option<OnnxPlan>,
+    input_mode: InferenceInputMode,
     online: OnlineClassifier,
     online_config: OnlineLearningConfig,
     online_window: VecDeque<(f64, [f32; FEATURE_COUNT])>,
@@ -163,12 +174,29 @@ impl InferenceStrategy {
             quantity,
             features: FeatureComputer::new(),
             model,
+            input_mode: InferenceInputMode::ScalarFeatures,
             online: OnlineClassifier::new(online_config.classifier),
             online_config,
             online_window: VecDeque::with_capacity(online_config.lookahead_ticks + 1),
             event_bus,
             warned: model_path.is_none(),
         }
+    }
+
+    /// Create an InferenceStrategy for a CNN model with input shape `[1, 2, 20]`.
+    pub fn new_lob_cnn(
+        symbol: impl Into<Symbol>,
+        quantity: Quantity,
+        model_path: Option<&str>,
+        event_bus: Option<Arc<EventBus>>,
+    ) -> Self {
+        Self::new(symbol, quantity, model_path, event_bus)
+            .with_input_mode(InferenceInputMode::LobCnn)
+    }
+
+    pub fn with_input_mode(mut self, input_mode: InferenceInputMode) -> Self {
+        self.input_mode = input_mode;
+        self
     }
 
     pub fn with_online_config(mut self, config: OnlineLearningConfig) -> Self {
@@ -184,6 +212,21 @@ impl InferenceStrategy {
         let input =
             tract_ndarray::Array2::<f32>::from_shape_vec((1, FEATURE_COUNT), feats.to_vec())
                 .ok()?;
+        let result = plan.run(tvec![input.into_tensor().into()]).ok()?;
+        let view = result[0].to_array_view::<f32>().ok()?;
+        let sell = *view.get([0, 0])?;
+        let buy = *view.get([0, 2])?;
+        Some([sell, 0.0, buy])
+    }
+
+    /// Run CNN ONNX inference on a `[2, 20]` LOB volume profile.
+    fn infer_lob(&self, lob: [[f32; LOB_LEVELS]; LOB_CHANNELS]) -> Option<[f32; 3]> {
+        let plan = self.model.as_ref()?;
+        let input = tract_ndarray::Array3::<f32>::from_shape_vec(
+            (1, LOB_CHANNELS, LOB_LEVELS),
+            flatten_lob(lob).to_vec(),
+        )
+        .ok()?;
         let result = plan.run(tvec![input.into_tensor().into()]).ok()?;
         let view = result[0].to_array_view::<f32>().ok()?;
         let sell = *view.get([0, 0])?;
@@ -290,9 +333,21 @@ impl Strategy for InferenceStrategy {
         };
 
         let (probs, threshold) = if self.model.is_some() {
-            match self.infer(feats) {
-                Some(p) => (p, SIGNAL_THRESHOLD),
-                None => return vec![],
+            match self.input_mode {
+                InferenceInputMode::ScalarFeatures => match self.infer(feats) {
+                    Some(p) => (p, SIGNAL_THRESHOLD),
+                    None => return vec![],
+                },
+                InferenceInputMode::LobCnn => {
+                    let lob = match self.features.compute_lob_snapshot(book) {
+                        Some(lob) => lob,
+                        None => return vec![],
+                    };
+                    match self.infer_lob(lob) {
+                        Some(p) => (p, SIGNAL_THRESHOLD),
+                        None => return vec![],
+                    }
+                }
             }
         } else {
             if !self.warned {
@@ -356,6 +411,15 @@ impl Strategy for InferenceStrategy {
         self.online_window.clear();
         self.warned = false;
     }
+}
+
+fn flatten_lob(lob: [[f32; LOB_LEVELS]; LOB_CHANNELS]) -> [f32; LOB_CHANNELS * LOB_LEVELS] {
+    let mut flat = [0.0f32; LOB_CHANNELS * LOB_LEVELS];
+    for channel in 0..LOB_CHANNELS {
+        let offset = channel * LOB_LEVELS;
+        flat[offset..offset + LOB_LEVELS].copy_from_slice(&lob[channel]);
+    }
+    flat
 }
 
 #[cfg(test)]
@@ -434,6 +498,27 @@ mod tests {
         assert!(strat.online.updates() >= 2);
         let probs = strat.online.predict([0.0; FEATURE_COUNT]);
         assert!(probs[2] > probs[0], "probs = {:?}", probs);
+    }
+
+    #[test]
+    fn test_lob_cnn_constructor_sets_input_mode() {
+        let strat = InferenceStrategy::new_lob_cnn("BTCUSDT", dec!(0.1), None, None);
+
+        assert_eq!(strat.input_mode, InferenceInputMode::LobCnn);
+    }
+
+    #[test]
+    fn test_flatten_lob_preserves_channel_major_layout() {
+        let mut lob = [[0.0f32; LOB_LEVELS]; LOB_CHANNELS];
+        lob[0][0] = 0.25;
+        lob[0][19] = 0.5;
+        lob[1][0] = 0.75;
+
+        let flat = flatten_lob(lob);
+
+        assert_eq!(flat[0], 0.25);
+        assert_eq!(flat[19], 0.5);
+        assert_eq!(flat[20], 0.75);
     }
 
     #[test]
