@@ -36,6 +36,12 @@ pub enum RiskViolation {
         impact_bps: Decimal,
         limit_bps: Decimal,
     },
+    #[error("Portfolio delta limit exceeded: {symbol} delta={delta} limit={limit}")]
+    PortfolioDelta {
+        symbol: Symbol,
+        delta: Quantity,
+        limit: Quantity,
+    },
 }
 
 /// Risk manager configuration.
@@ -63,6 +69,10 @@ pub struct RiskConfig {
     pub default_adv: Quantity,
     /// Fallback fractional volatility when no symbol-specific estimate exists.
     pub default_volatility: Decimal,
+    /// Maximum correlation-adjusted portfolio delta. Zero disables the check.
+    pub max_portfolio_delta: Quantity,
+    /// Pairwise symbol correlations used for joint exposure checks.
+    pub correlation_matrix: HashMap<(Symbol, Symbol), Decimal>,
 }
 
 impl Default for RiskConfig {
@@ -78,6 +88,8 @@ impl Default for RiskConfig {
             impact_eta: Decimal::ONE,
             default_adv: Decimal::ZERO,
             default_volatility: Decimal::ZERO,
+            max_portfolio_delta: Decimal::ZERO,
+            correlation_matrix: HashMap::new(),
         }
     }
 }
@@ -160,6 +172,8 @@ impl RiskManager {
             .unwrap_or(self.config.default_max_position);
 
         check_position_limit(current_position, signal, max_position)?;
+        self.check_portfolio_delta(signal, &positions)?;
+        drop(positions);
 
         // Check daily loss
         let pnl = *self.daily_pnl.read();
@@ -284,6 +298,69 @@ impl RiskManager {
         self.market_impact_inputs
             .write()
             .insert(symbol, MarketImpactInput { adv, volatility });
+    }
+
+    /// Correlation-adjusted portfolio delta relative to `base_symbol`.
+    ///
+    /// A position in `base_symbol` has weight 1.0. Other positions use the
+    /// configured pairwise correlation; missing correlations are treated as 0.
+    pub fn portfolio_delta(&self, base_symbol: Symbol) -> Quantity {
+        let positions = self.positions.read();
+        self.portfolio_delta_from_positions(base_symbol, &positions)
+    }
+
+    fn check_portfolio_delta(
+        &self,
+        signal: &Signal,
+        positions: &HashMap<Symbol, Quantity>,
+    ) -> Result<(), RiskViolation> {
+        if self.config.max_portfolio_delta <= Decimal::ZERO {
+            return Ok(());
+        }
+
+        let mut projected = positions.clone();
+        let position = projected.entry(signal.symbol).or_insert(Decimal::ZERO);
+        match signal.side {
+            Side::Buy => *position += signal.quantity.to_decimal(),
+            Side::Sell => *position -= signal.quantity.to_decimal(),
+        }
+
+        let delta = self
+            .portfolio_delta_from_positions(signal.symbol, &projected)
+            .abs();
+        if delta > self.config.max_portfolio_delta {
+            return Err(RiskViolation::PortfolioDelta {
+                symbol: signal.symbol,
+                delta,
+                limit: self.config.max_portfolio_delta,
+            });
+        }
+
+        Ok(())
+    }
+
+    fn portfolio_delta_from_positions(
+        &self,
+        base_symbol: Symbol,
+        positions: &HashMap<Symbol, Quantity>,
+    ) -> Quantity {
+        positions
+            .iter()
+            .map(|(symbol, position)| *position * self.correlation(base_symbol, *symbol))
+            .sum()
+    }
+
+    fn correlation(&self, a: Symbol, b: Symbol) -> Decimal {
+        if a == b {
+            return Decimal::ONE;
+        }
+
+        self.config
+            .correlation_matrix
+            .get(&(a, b))
+            .or_else(|| self.config.correlation_matrix.get(&(b, a)))
+            .copied()
+            .unwrap_or(Decimal::ZERO)
     }
 
     fn check_price_impact(&self, signal: &Signal) -> Result<(), RiskViolation> {
@@ -584,6 +661,86 @@ mod tests {
             order_type: OrderType::Market,
             price: None,
             quantity: dec!(1).into(),
+            strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
+        };
+
+        assert!(manager.check(&signal).is_ok());
+    }
+
+    #[test]
+    fn test_portfolio_delta_weights_correlated_positions() {
+        let btc = Symbol::new("BTCUSDT");
+        let eth = Symbol::new("ETHUSDT");
+        let mut correlation_matrix = HashMap::new();
+        correlation_matrix.insert((btc, eth), dec!(0.9));
+
+        let manager = RiskManager::new(RiskConfig {
+            correlation_matrix,
+            ..Default::default()
+        });
+
+        {
+            let mut positions = manager.positions.write();
+            positions.insert(btc, dec!(1.0));
+            positions.insert(eth, dec!(0.5));
+        }
+
+        assert_eq!(manager.portfolio_delta(eth), dec!(1.40));
+    }
+
+    #[test]
+    fn test_portfolio_delta_rejects_correlated_same_direction_order() {
+        let btc = Symbol::new("BTCUSDT");
+        let eth = Symbol::new("ETHUSDT");
+        let mut correlation_matrix = HashMap::new();
+        correlation_matrix.insert((btc, eth), dec!(0.9));
+
+        let manager = RiskManager::new(RiskConfig {
+            max_portfolio_delta: dec!(1.5),
+            default_max_position: dec!(10),
+            correlation_matrix,
+            ..Default::default()
+        });
+
+        manager.positions.write().insert(btc, dec!(1.0));
+
+        let signal = Signal {
+            symbol: eth,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            quantity: dec!(0.7).into(),
+            strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
+        };
+
+        let result = manager.check(&signal);
+        assert!(matches!(result, Err(RiskViolation::PortfolioDelta { .. })));
+    }
+
+    #[test]
+    fn test_portfolio_delta_allows_correlated_hedge_order() {
+        let btc = Symbol::new("BTCUSDT");
+        let eth = Symbol::new("ETHUSDT");
+        let mut correlation_matrix = HashMap::new();
+        correlation_matrix.insert((btc, eth), dec!(0.9));
+
+        let manager = RiskManager::new(RiskConfig {
+            max_portfolio_delta: dec!(1.5),
+            default_max_position: dec!(10),
+            correlation_matrix,
+            ..Default::default()
+        });
+
+        manager.positions.write().insert(btc, dec!(1.0));
+
+        let signal = Signal {
+            symbol: eth,
+            side: Side::Sell,
+            order_type: OrderType::Market,
+            price: None,
+            quantity: dec!(0.7).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
         };

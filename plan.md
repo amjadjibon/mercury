@@ -47,7 +47,7 @@ This file tracks what comes next.
 
 - [x] **Intraday trailing drawdown** — halt new orders when equity drops X% from session high (separate from daily loss limit). Track `session_high_pnl` in `RiskManager`, emit kill-switch when `(high - current) / high > threshold`. File: `crates/risk/src/manager.rs`.
 
-- [ ] **Correlation-aware joint position limit** — BTC and ETH are ~0.9 correlated; a long BTC + long ETH doubles directional exposure. Add a `portfolio_delta()` method in `RiskManager` that sums positions weighted by correlation matrix. File: `crates/risk/src/manager.rs`.
+- [x] **Correlation-aware joint position limit** — BTC and ETH are ~0.9 correlated; a long BTC + long ETH doubles directional exposure. `RiskManager::portfolio_delta(symbol)` sums positions weighted by a configurable correlation matrix, and pre-trade checks reject projected exposure above `max_portfolio_delta`. File: `crates/risk/src/manager.rs`.
 
 - [x] **Inventory skew wired to quote pricing** — `MarketMaker` can use an external skew provider, and the CLI wires it to `RiskManager::skew(symbol)`. Long-heavy skew shifts both bid and ask down by `skew * σ` to lean toward selling. File: `crates/strategy/src/market_maker.rs`.
 
@@ -102,7 +102,7 @@ This file tracks what comes next.
 9. ~~Triangular arbitrage~~ ✅
 10. ~~Volume prediction + Almgren-Chriss impact (dependency chain)~~ ✅
 11. ~~Inventory skew wired to MarketMaker~~ ✅
-12. Correlation-aware position limits
+12. ~~Correlation-aware position limits~~ ✅
 13. IOC/FOK + Post-only TIF
 14. Queue position / fill probability
 15. Spoofing / iceberg detection
@@ -137,7 +137,7 @@ This file tracks what comes next.
 | Volume Prediction | ✅ VolumeEstimator |
 | Price Impact (Almgren-Chriss) | ✅ pre-trade risk check |
 | Inventory Skew | ✅ RiskManager skew wired to MarketMaker |
-| Correlation Position Limits | 📋 #12 |
+| Correlation Position Limits | ✅ correlation-weighted portfolio delta |
 | IOC / FOK / Post-only | 📋 #13 |
 | Queue / Fill Probability | 📋 #14 |
 | Iceberg / Spoofing Detection | 📋 #15 |
