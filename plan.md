@@ -21,7 +21,7 @@ This file tracks what comes next.
 
 - [ ] **Spoofing / iceberg detection** — spoofing: large quote appears then cancels before fill (track cancel-rate per price level). Iceberg: repeated fills at same price despite thin visible qty. Add to `crates/risk/src/manager.rs` as a signal quality filter.
 
-- [ ] **Volume prediction** — rolling ADV (average daily volume) estimator using exponential decay: `ADV_t = α·V_t + (1−α)·ADV_{t−1}`. Exposes predicted volume as input to TWAP pacing and the Almgren-Chriss impact model. Add `VolumeEstimator` in `crates/strategy/src/features.rs`.
+- [x] **Volume prediction** — rolling ADV (average daily volume) estimator using exponential decay: `ADV_t = α·V_t + (1−α)·ADV_{t−1}`. `VolumeEstimator` added in `crates/strategy/src/features.rs`; kept separate from `FeatureComputer` to avoid changing ONNX input shape.
 
 - [ ] **Sentiment / news signal** — consume a REST or WebSocket news feed (e.g. Benzinga, CryptoPanic), run keyword scoring (+/− words), emit a `SentimentSignal` on the event bus within 50 ms of headline. Add `NewsParser` in `crates/market/src/news.rs` and `SentimentStrategy` in `crates/strategy/src/sentiment.rs`.
 
@@ -57,7 +57,7 @@ This file tracks what comes next.
 
 - [x] **Realised volatility estimator** — 5-minute Parkinson estimator: `σ² = (ln(H/L))² / (4·ln2)`. Add `VolatilityEstimator` in `crates/strategy/src/volatility.rs`. Wired into MarketMaker — overrides EMA variance once warm (≥2 bars).
 
-- [ ] **Price impact model (Almgren-Chriss)** — `impact = η · σ · sqrt(Q / ADV)` where ADV is average daily volume. Warn before submitting orders that would move the book. Add to `crates/risk/src/manager.rs` as a pre-trade check. Requires `VolumeEstimator` above.
+- [x] **Price impact model (Almgren-Chriss)** — `impact = η · σ · sqrt(Q / ADV)` where ADV is average daily volume. Added to `crates/risk/src/manager.rs` as a configurable pre-trade check using per-symbol ADV/volatility inputs.
 
 - [ ] **Queue position / fill probability** — estimate P(fill) at each price level from queue depth and historical fill rate. Use to choose limit vs market: if P(fill) < 0.4, send market order instead. Add `FillProbabilityModel` in `crates/execution/src/queue_model.rs`.
 
@@ -100,7 +100,7 @@ This file tracks what comes next.
 7. ~~Pairs stat-arb~~ ✅
 8. ~~Order book imbalance~~ ✅
 9. ~~Triangular arbitrage~~ ✅
-10. Volume prediction + Almgren-Chriss impact (dependency chain)
+10. ~~Volume prediction + Almgren-Chriss impact (dependency chain)~~ ✅
 11. Inventory skew wired to MarketMaker
 12. Correlation-aware position limits
 13. IOC/FOK + Post-only TIF
@@ -134,8 +134,8 @@ This file tracks what comes next.
 | Tick Data / FixedPoint hot path | ✅ FixedPoint i64 |
 | Order Book Imbalance | ✅ ObiStrategy |
 | Triangular Arbitrage | ✅ TriangularStrategy |
-| Volume Prediction | 📋 #10 |
-| Price Impact (Almgren-Chriss) | 📋 #10 |
+| Volume Prediction | ✅ VolumeEstimator |
+| Price Impact (Almgren-Chriss) | ✅ pre-trade risk check |
 | Inventory Skew | 📋 #11 |
 | Correlation Position Limits | 📋 #12 |
 | IOC / FOK / Post-only | 📋 #13 |

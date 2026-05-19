@@ -59,10 +59,7 @@ pub fn check_intraday_drawdown(
 ) -> Result<(), RiskViolation> {
     let drawdown = session_high - current_pnl;
     if drawdown > limit {
-        return Err(RiskViolation::IntradayDrawdown {
-            drawdown,
-            limit,
-        });
+        return Err(RiskViolation::IntradayDrawdown { drawdown, limit });
     }
     Ok(())
 }
@@ -100,6 +97,41 @@ pub fn calculate_skew(position: Quantity, max_position: Quantity) -> Decimal {
         return Decimal::ZERO;
     }
     position / max_position
+}
+
+/// Estimate price impact in basis points using a compact Almgren-Chriss style model.
+///
+/// `quantity` and `adv` must be in the same units. `sigma` is a fractional
+/// volatility estimate, and `eta` scales the market-impact penalty.
+pub fn almgren_chriss_impact_bps(
+    quantity: Quantity,
+    adv: Quantity,
+    sigma: Decimal,
+    eta: Decimal,
+) -> Decimal {
+    if quantity <= Decimal::ZERO
+        || adv <= Decimal::ZERO
+        || sigma <= Decimal::ZERO
+        || eta <= Decimal::ZERO
+    {
+        return Decimal::ZERO;
+    }
+
+    let q = decimal_to_f64(quantity);
+    let adv = decimal_to_f64(adv);
+    let sigma = decimal_to_f64(sigma);
+    let eta = decimal_to_f64(eta);
+
+    if q <= 0.0 || adv <= 0.0 || sigma <= 0.0 || eta <= 0.0 {
+        return Decimal::ZERO;
+    }
+
+    let impact_bps = eta * sigma * (q / adv).sqrt() * 10_000.0;
+    Decimal::from_str_exact(&format!("{impact_bps:.8}")).unwrap_or(Decimal::ZERO)
+}
+
+fn decimal_to_f64(value: Decimal) -> f64 {
+    value.to_string().parse::<f64>().unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -174,5 +206,19 @@ mod tests {
     fn test_kelly_insufficient_data() {
         let k = kelly_fraction(5, 3, dec!(100), dec!(50), dec!(0.25));
         assert_eq!(k, dec!(0.25)); // fewer than 10 trades → max_kelly
+    }
+
+    #[test]
+    fn test_almgren_chriss_impact_bps() {
+        let impact = almgren_chriss_impact_bps(dec!(100), dec!(10000), dec!(0.02), dec!(1));
+        assert_eq!(impact, dec!(20.00000000));
+    }
+
+    #[test]
+    fn test_almgren_chriss_impact_handles_missing_inputs() {
+        assert_eq!(
+            almgren_chriss_impact_bps(dec!(100), dec!(0), dec!(0.02), dec!(1)),
+            Decimal::ZERO
+        );
     }
 }

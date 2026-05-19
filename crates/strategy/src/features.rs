@@ -12,6 +12,66 @@ use std::collections::VecDeque;
 /// Number of features in the output vector.
 pub const FEATURE_COUNT: usize = 10;
 
+/// Exponentially weighted average daily volume estimator.
+///
+/// This is intentionally separate from `FeatureComputer` so the ONNX feature
+/// shape remains stable until a new model is trained.
+#[derive(Debug, Clone)]
+pub struct VolumeEstimator {
+    alpha: Decimal,
+    adv: Decimal,
+    observations: usize,
+    warmup_observations: usize,
+}
+
+impl VolumeEstimator {
+    pub fn new(alpha: Decimal, warmup_observations: usize) -> Self {
+        assert!(
+            alpha > Decimal::ZERO && alpha <= Decimal::ONE,
+            "alpha must be in (0, 1]"
+        );
+        Self {
+            alpha,
+            adv: Decimal::ZERO,
+            observations: 0,
+            warmup_observations,
+        }
+    }
+
+    pub fn update(&mut self, volume: Quantity) -> Decimal {
+        self.adv = if self.observations == 0 {
+            volume
+        } else {
+            self.alpha * volume + (Decimal::ONE - self.alpha) * self.adv
+        };
+        self.observations += 1;
+        self.adv
+    }
+
+    pub fn adv(&self) -> Decimal {
+        self.adv
+    }
+
+    pub fn observations(&self) -> usize {
+        self.observations
+    }
+
+    pub fn is_warm(&self) -> bool {
+        self.observations >= self.warmup_observations
+    }
+
+    pub fn reset(&mut self) {
+        self.adv = Decimal::ZERO;
+        self.observations = 0;
+    }
+}
+
+impl Default for VolumeEstimator {
+    fn default() -> Self {
+        Self::new(Decimal::from_str_exact("0.1").unwrap(), 10)
+    }
+}
+
 /// Computes a fixed-length feature vector from live market data.
 ///
 /// | Index | Feature | Range |
@@ -125,7 +185,13 @@ impl FeatureComputer {
         let rsi_norm = to_f32(rsi_val / Decimal::from(100));
 
         // Feature 3: MACD sign × clamped magnitude
-        let macd_sign: f32 = if macd_hist > Decimal::ZERO { 1.0 } else if macd_hist < Decimal::ZERO { -1.0 } else { 0.0 };
+        let macd_sign: f32 = if macd_hist > Decimal::ZERO {
+            1.0
+        } else if macd_hist < Decimal::ZERO {
+            -1.0
+        } else {
+            0.0
+        };
         let macd_mag = if mid.is_zero() {
             0.0f32
         } else {
@@ -134,21 +200,45 @@ impl FeatureComputer {
         let macd_feature = macd_sign * macd_mag;
 
         // Feature 4: depth ratio top-5
-        let bid_depth: Decimal = book.top_bids(5).iter().map(|l| l.quantity.to_decimal()).sum();
-        let ask_depth: Decimal = book.top_asks(5).iter().map(|l| l.quantity.to_decimal()).sum();
+        let bid_depth: Decimal = book
+            .top_bids(5)
+            .iter()
+            .map(|l| l.quantity.to_decimal())
+            .sum();
+        let ask_depth: Decimal = book
+            .top_asks(5)
+            .iter()
+            .map(|l| l.quantity.to_decimal())
+            .sum();
         let total_depth = bid_depth + ask_depth;
-        let depth_ratio = if total_depth.is_zero() { 0.5f32 } else { to_f32(bid_depth / total_depth) };
+        let depth_ratio = if total_depth.is_zero() {
+            0.5f32
+        } else {
+            to_f32(bid_depth / total_depth)
+        };
 
         // Feature 5: EMA-50 deviation
-        let ema_dev = if ema_val.is_zero() { 0.0f32 } else { to_f32((mid - ema_val) / ema_val) };
+        let ema_dev = if ema_val.is_zero() {
+            0.0f32
+        } else {
+            to_f32((mid - ema_val) / ema_val)
+        };
 
         // Feature 6: ATR normalised
-        let atr_norm = if mid.is_zero() { 0.0f32 } else { to_f32(atr_val / mid) };
+        let atr_norm = if mid.is_zero() {
+            0.0f32
+        } else {
+            to_f32(atr_val / mid)
+        };
 
         // Feature 7: VWAP deviation
         let vwap_dev = if !self.vwap_sum_v.is_zero() {
             let vwap = self.vwap_sum_pv / self.vwap_sum_v;
-            if vwap.is_zero() { 0.0f32 } else { to_f32((mid - vwap) / vwap) }
+            if vwap.is_zero() {
+                0.0f32
+            } else {
+                to_f32((mid - vwap) / vwap)
+            }
         } else {
             0.0f32
         };
@@ -158,19 +248,34 @@ impl FeatureComputer {
         let depth_slope = if bids.len() >= 2 {
             let top_qty = bids[0].quantity.to_decimal();
             let bot_qty = bids[bids.len() - 1].quantity.to_decimal();
-            if mid.is_zero() { 0.0f32 } else { to_f32((top_qty - bot_qty) / mid) }
+            if mid.is_zero() {
+                0.0f32
+            } else {
+                to_f32((top_qty - bot_qty) / mid)
+            }
         } else {
             0.0f32
         };
 
         // Feature 9: trade-flow imbalance
         let total_flow = self.flow_buy_sum + self.flow_sell_sum;
-        let trade_flow = if total_flow.is_zero() { 0.5f32 } else { to_f32(self.flow_buy_sum / total_flow) };
+        let trade_flow = if total_flow.is_zero() {
+            0.5f32
+        } else {
+            to_f32(self.flow_buy_sum / total_flow)
+        };
 
         Some([
-            imbalance, spread_norm, rsi_norm, macd_feature,
-            depth_ratio, ema_dev, atr_norm, vwap_dev,
-            depth_slope, trade_flow,
+            imbalance,
+            spread_norm,
+            rsi_norm,
+            macd_feature,
+            depth_ratio,
+            ema_dev,
+            atr_norm,
+            vwap_dev,
+            depth_slope,
+            trade_flow,
         ])
     }
 
@@ -248,5 +353,26 @@ mod tests {
         fc.reset();
         // After reset, VWAP window is empty
         assert!(fc.vwap_window.is_empty());
+    }
+
+    #[test]
+    fn test_volume_estimator_uses_exponential_decay() {
+        let mut estimator = VolumeEstimator::new(dec!(0.25), 2);
+
+        assert_eq!(estimator.update(dec!(1000)), dec!(1000));
+        assert_eq!(estimator.update(dec!(2000)), dec!(1250.00));
+        assert!(estimator.is_warm());
+        assert_eq!(estimator.adv(), dec!(1250.00));
+    }
+
+    #[test]
+    fn test_volume_estimator_reset() {
+        let mut estimator = VolumeEstimator::default();
+        estimator.update(dec!(1000));
+        estimator.reset();
+
+        assert_eq!(estimator.adv(), Decimal::ZERO);
+        assert_eq!(estimator.observations(), 0);
+        assert!(!estimator.is_warm());
     }
 }

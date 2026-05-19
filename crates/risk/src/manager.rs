@@ -1,8 +1,8 @@
 //! Risk manager for pre-trade validation.
 
 use crate::checks::{
-    calculate_skew, check_daily_loss, check_intraday_drawdown, check_position_limit,
-    check_rate_limit, kelly_fraction,
+    almgren_chriss_impact_bps, calculate_skew, check_daily_loss, check_intraday_drawdown,
+    check_position_limit, check_rate_limit, kelly_fraction,
 };
 use crate::kill_switch::KillSwitch;
 use mercury_core::{Fill, Price, Quantity, Side, Signal, Symbol};
@@ -30,6 +30,12 @@ pub enum RiskViolation {
     KillSwitchActive,
     #[error("Intraday drawdown limit hit: drawdown={drawdown} limit={limit}")]
     IntradayDrawdown { drawdown: Price, limit: Price },
+    #[error("Price impact limit exceeded: {symbol} impact={impact_bps}bps limit={limit_bps}bps")]
+    PriceImpact {
+        symbol: Symbol,
+        impact_bps: Decimal,
+        limit_bps: Decimal,
+    },
 }
 
 /// Risk manager configuration.
@@ -49,6 +55,14 @@ pub struct RiskConfig {
     pub intraday_drawdown_limit: Price,
     /// Maximum Kelly fraction for position sizing (e.g. 0.25 = quarter Kelly).
     pub max_kelly: Decimal,
+    /// Maximum estimated market impact in basis points. Zero disables the check.
+    pub max_price_impact_bps: Decimal,
+    /// Almgren-Chriss temporary impact multiplier.
+    pub impact_eta: Decimal,
+    /// Fallback average daily volume when no symbol-specific estimate exists.
+    pub default_adv: Quantity,
+    /// Fallback fractional volatility when no symbol-specific estimate exists.
+    pub default_volatility: Decimal,
 }
 
 impl Default for RiskConfig {
@@ -60,8 +74,19 @@ impl Default for RiskConfig {
             max_orders_per_second: 10,
             intraday_drawdown_limit: Decimal::from(2000), // halt if down $2000 from session high
             max_kelly: Decimal::from_str_exact("0.25").unwrap(),
+            max_price_impact_bps: Decimal::ZERO,
+            impact_eta: Decimal::ONE,
+            default_adv: Decimal::ZERO,
+            default_volatility: Decimal::ZERO,
         }
     }
+}
+
+/// Market state inputs used by the price-impact pre-trade check.
+#[derive(Debug, Clone, Copy, Default)]
+struct MarketImpactInput {
+    adv: Quantity,
+    volatility: Decimal,
 }
 
 /// A snapshot of (fill_price, mid_price_at_fill_time, side, fill timestamp nanos).
@@ -94,6 +119,8 @@ pub struct RiskManager {
     fill_snapshots: RwLock<Vec<FillSnapshot>>,
     /// Rolling trade outcomes for Kelly sizing (capped at 100).
     trade_outcomes: RwLock<Vec<TradeOutcome>>,
+    /// Per-symbol ADV and volatility estimates for market-impact checks.
+    market_impact_inputs: RwLock<HashMap<Symbol, MarketImpactInput>>,
 }
 
 impl RiskManager {
@@ -108,6 +135,7 @@ impl RiskManager {
             kill_switch: Arc::new(KillSwitch::new()),
             fill_snapshots: RwLock::new(Vec::new()),
             trade_outcomes: RwLock::new(Vec::new()),
+            market_impact_inputs: RwLock::new(HashMap::new()),
         }
     }
 
@@ -142,6 +170,8 @@ impl RiskManager {
             let session_high = *self.session_high_pnl.read();
             check_intraday_drawdown(pnl, session_high, self.config.intraday_drawdown_limit)?;
         }
+
+        self.check_price_impact(signal)?;
 
         // Check rate limit
         let timestamps = self.order_timestamps.read();
@@ -216,15 +246,77 @@ impl RiskManager {
     /// Returns `max_kelly` when fewer than 10 trades have been recorded.
     pub fn kelly_fraction(&self) -> Decimal {
         let outcomes = self.trade_outcomes.read();
-        let wins: Vec<Price> = outcomes.iter().filter(|o| o.pnl > Decimal::ZERO).map(|o| o.pnl).collect();
-        let losses: Vec<Price> = outcomes.iter().filter(|o| o.pnl < Decimal::ZERO).map(|o| o.pnl.abs()).collect();
+        let wins: Vec<Price> = outcomes
+            .iter()
+            .filter(|o| o.pnl > Decimal::ZERO)
+            .map(|o| o.pnl)
+            .collect();
+        let losses: Vec<Price> = outcomes
+            .iter()
+            .filter(|o| o.pnl < Decimal::ZERO)
+            .map(|o| o.pnl.abs())
+            .collect();
 
         let win_count = wins.len() as u32;
         let loss_count = losses.len() as u32;
-        let avg_win = if win_count > 0 { wins.iter().sum::<Price>() / Decimal::from(win_count) } else { Decimal::ZERO };
-        let avg_loss = if loss_count > 0 { losses.iter().sum::<Price>() / Decimal::from(loss_count) } else { Decimal::ZERO };
+        let avg_win = if win_count > 0 {
+            wins.iter().sum::<Price>() / Decimal::from(win_count)
+        } else {
+            Decimal::ZERO
+        };
+        let avg_loss = if loss_count > 0 {
+            losses.iter().sum::<Price>() / Decimal::from(loss_count)
+        } else {
+            Decimal::ZERO
+        };
 
-        kelly_fraction(win_count, loss_count, avg_win, avg_loss, self.config.max_kelly)
+        kelly_fraction(
+            win_count,
+            loss_count,
+            avg_win,
+            avg_loss,
+            self.config.max_kelly,
+        )
+    }
+
+    /// Update ADV and volatility inputs for pre-trade price-impact checks.
+    pub fn update_market_impact_input(&self, symbol: Symbol, adv: Quantity, volatility: Decimal) {
+        self.market_impact_inputs
+            .write()
+            .insert(symbol, MarketImpactInput { adv, volatility });
+    }
+
+    fn check_price_impact(&self, signal: &Signal) -> Result<(), RiskViolation> {
+        if self.config.max_price_impact_bps <= Decimal::ZERO {
+            return Ok(());
+        }
+
+        let input = self
+            .market_impact_inputs
+            .read()
+            .get(&signal.symbol)
+            .copied()
+            .unwrap_or(MarketImpactInput {
+                adv: self.config.default_adv,
+                volatility: self.config.default_volatility,
+            });
+
+        let impact_bps = almgren_chriss_impact_bps(
+            signal.quantity.to_decimal(),
+            input.adv,
+            input.volatility,
+            self.config.impact_eta,
+        );
+
+        if impact_bps > self.config.max_price_impact_bps {
+            return Err(RiskViolation::PriceImpact {
+                symbol: signal.symbol,
+                impact_bps,
+                limit_bps: self.config.max_price_impact_bps,
+            });
+        }
+
+        Ok(())
     }
 
     /// Current intraday drawdown (session_high - current_pnl). Zero or positive.
@@ -321,8 +413,7 @@ impl RiskManager {
         if all_adverse {
             warn!(
                 consecutive = min_consecutive,
-                threshold_bps,
-                "Fill toxicity detected — activating kill switch"
+                threshold_bps, "Fill toxicity detected — activating kill switch"
             );
             self.kill_switch.activate();
         }
@@ -335,6 +426,7 @@ impl RiskManager {
         self.order_timestamps.write().clear();
         self.fill_snapshots.write().clear();
         self.trade_outcomes.write().clear();
+        self.market_impact_inputs.write().clear();
         self.kill_switch.reset();
     }
 }
@@ -387,7 +479,10 @@ mod tests {
 
         // Drop $600 — exceeds $500 limit.
         manager.update_pnl(dec!(-600));
-        assert!(manager.kill_switch().is_active(), "kill switch should fire on drawdown");
+        assert!(
+            manager.kill_switch().is_active(),
+            "kill switch should fire on drawdown"
+        );
         assert_eq!(manager.intraday_drawdown(), dec!(600));
     }
 
@@ -397,8 +492,12 @@ mod tests {
 
         // 7 wins of $100, 3 losses of $50 → win_rate=0.7, avg_win=100, avg_loss=50
         // kelly = 0.7 - 0.3/2.0 = 0.7 - 0.15 = 0.55 → capped at 0.25
-        for _ in 0..7 { manager.record_trade_outcome(dec!(100)); }
-        for _ in 0..3 { manager.record_trade_outcome(dec!(-50)); }
+        for _ in 0..7 {
+            manager.record_trade_outcome(dec!(100));
+        }
+        for _ in 0..3 {
+            manager.record_trade_outcome(dec!(-50));
+        }
 
         let k = manager.kelly_fraction();
         assert_eq!(k, dec!(0.25)); // capped at max_kelly
@@ -408,13 +507,18 @@ mod tests {
     fn test_kelly_returns_max_when_insufficient_data() {
         let manager = RiskManager::new(RiskConfig::default());
         // Fewer than 10 trades → return max_kelly (0.25)
-        for _ in 0..5 { manager.record_trade_outcome(dec!(100)); }
+        for _ in 0..5 {
+            manager.record_trade_outcome(dec!(100));
+        }
         assert_eq!(manager.kelly_fraction(), dec!(0.25));
     }
 
     #[test]
     fn test_session_high_tracks_peak() {
-        let manager = RiskManager::new(RiskConfig { intraday_drawdown_limit: dec!(0), ..Default::default() });
+        let manager = RiskManager::new(RiskConfig {
+            intraday_drawdown_limit: dec!(0),
+            ..Default::default()
+        });
         manager.update_pnl(dec!(300));
         manager.update_pnl(dec!(200));
         manager.update_pnl(dec!(-100));
@@ -439,5 +543,51 @@ mod tests {
 
         let result = manager.check(&signal);
         assert!(matches!(result, Err(RiskViolation::KillSwitchActive)));
+    }
+
+    #[test]
+    fn test_price_impact_rejects_large_order() {
+        let manager = RiskManager::new(RiskConfig {
+            max_price_impact_bps: dec!(10),
+            impact_eta: dec!(1),
+            default_max_position: dec!(1000),
+            ..Default::default()
+        });
+        manager.update_market_impact_input(Symbol::new("BTCUSDT"), dec!(10000), dec!(0.02));
+
+        let signal = Signal {
+            symbol: Symbol::new("BTCUSDT"),
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            quantity: dec!(100).into(),
+            strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
+        };
+
+        let result = manager.check(&signal);
+        assert!(matches!(result, Err(RiskViolation::PriceImpact { .. })));
+    }
+
+    #[test]
+    fn test_price_impact_allows_small_order() {
+        let manager = RiskManager::new(RiskConfig {
+            max_price_impact_bps: dec!(10),
+            impact_eta: dec!(1),
+            ..Default::default()
+        });
+        manager.update_market_impact_input(Symbol::new("BTCUSDT"), dec!(10000), dec!(0.02));
+
+        let signal = Signal {
+            symbol: Symbol::new("BTCUSDT"),
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            quantity: dec!(1).into(),
+            strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
+        };
+
+        assert!(manager.check(&signal).is_ok());
     }
 }
