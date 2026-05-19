@@ -47,6 +47,8 @@ pub enum EventPayload {
     LatencyReport(LatencyReport),
     /// ML model prediction logged by InferenceStrategy.
     MLPrediction(MLPrediction),
+    /// Keyword-scored market news signal.
+    SentimentSignal(SentimentSignal),
 }
 
 /// Periodic latency snapshot emitted by the strategy runner.
@@ -69,6 +71,19 @@ pub struct MLPrediction {
     pub buy_prob: f32,
     /// -1 = SELL, 0 = HOLD, 1 = BUY
     pub decision: i8,
+}
+
+/// Keyword-scored news or headline sentiment signal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SentimentSignal {
+    pub symbol: Symbol,
+    /// Signed score; positive is bullish, negative is bearish.
+    pub score: i32,
+    /// Confidence in `[0, 1]` derived from keyword hit strength.
+    pub confidence: f32,
+    pub headline: String,
+    pub source: String,
+    pub timestamp: Timestamp,
 }
 
 /// Maximum number of levels stored inline in a `BookUpdate`.
@@ -171,6 +186,7 @@ pub enum StrategyId {
     Pairs = 5,
     Obi = 6,
     Triangular = 7,
+    Sentiment = 8,
     Unknown = 255,
 }
 
@@ -185,6 +201,7 @@ impl StrategyId {
             Self::Pairs => "Pairs",
             Self::Obi => "OBI",
             Self::Triangular => "Triangular",
+            Self::Sentiment => "Sentiment",
             Self::Unknown => "Unknown",
         }
     }

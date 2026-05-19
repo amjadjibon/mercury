@@ -74,6 +74,13 @@ impl StrategyRunner {
                 }
                 vec![]
             }
+            EventPayload::SentimentSignal(sentiment) => {
+                let mut signals = Vec::new();
+                for strategy in &mut self.strategies {
+                    signals.extend(strategy.on_sentiment(sentiment));
+                }
+                signals
+            }
             _ => vec![],
         }
     }
@@ -108,10 +115,7 @@ impl StrategyRunner {
     ///
     /// Returns the `JoinHandle`. Call `event_bus.close()` to signal shutdown;
     /// the thread exits cleanly when `recv()` returns `None`.
-    pub fn run_on_thread(
-        mut self,
-        core_id: Option<usize>,
-    ) -> std::thread::JoinHandle<()> {
+    pub fn run_on_thread(mut self, core_id: Option<usize>) -> std::thread::JoinHandle<()> {
         std::thread::Builder::new()
             .name("mercury-strategy".into())
             .spawn(move || {
@@ -124,7 +128,11 @@ impl StrategyRunner {
                                 warn!(core = idx, "Failed to pin strategy thread to CPU core");
                             }
                         } else {
-                            warn!(core = idx, available = cores.len(), "CPU core index out of range");
+                            warn!(
+                                core = idx,
+                                available = cores.len(),
+                                "CPU core index out of range"
+                            );
                         }
                     }
                 }
@@ -138,18 +146,21 @@ impl StrategyRunner {
                     if !signals.is_empty() {
                         self.publish_signals(signals);
                     }
-                    self.latency.record((mercury_core::types::now_nanos() - t0) as u64);
+                    self.latency
+                        .record((mercury_core::types::now_nanos() - t0) as u64);
 
                     let count = self.latency.count();
                     if count % 1000 == 0 && count > 0 {
                         let report = mercury_core::Event::new(
                             self.event_bus.next_id(),
-                            mercury_core::EventPayload::LatencyReport(mercury_core::LatencyReport {
-                                p50_ns: self.latency.p50(),
-                                p99_ns: self.latency.p99(),
-                                p999_ns: self.latency.p999(),
-                                count,
-                            }),
+                            mercury_core::EventPayload::LatencyReport(
+                                mercury_core::LatencyReport {
+                                    p50_ns: self.latency.p50(),
+                                    p99_ns: self.latency.p99(),
+                                    p999_ns: self.latency.p999(),
+                                    count,
+                                },
+                            ),
                         );
                         let _ = self.event_bus.try_publish(report);
                     }
@@ -175,18 +186,21 @@ impl StrategyRunner {
                     if !signals.is_empty() {
                         self.publish_signals(signals);
                     }
-                    self.latency.record((mercury_core::types::now_nanos() - t0) as u64);
+                    self.latency
+                        .record((mercury_core::types::now_nanos() - t0) as u64);
 
                     let count = self.latency.count();
                     if count % 1000 == 0 && count > 0 {
                         let report = mercury_core::Event::new(
                             self.event_bus.next_id(),
-                            mercury_core::EventPayload::LatencyReport(mercury_core::LatencyReport {
-                                p50_ns: self.latency.p50(),
-                                p99_ns: self.latency.p99(),
-                                p999_ns: self.latency.p999(),
-                                count,
-                            }),
+                            mercury_core::EventPayload::LatencyReport(
+                                mercury_core::LatencyReport {
+                                    p50_ns: self.latency.p50(),
+                                    p99_ns: self.latency.p99(),
+                                    p999_ns: self.latency.p999(),
+                                    count,
+                                },
+                            ),
                         );
                         let _ = self.event_bus.try_publish(report);
                     }

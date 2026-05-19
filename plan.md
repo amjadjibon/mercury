@@ -23,7 +23,7 @@ This file tracks what comes next.
 
 - [x] **Volume prediction** — rolling ADV (average daily volume) estimator using exponential decay: `ADV_t = α·V_t + (1−α)·ADV_{t−1}`. `VolumeEstimator` added in `crates/strategy/src/features.rs`; kept separate from `FeatureComputer` to avoid changing ONNX input shape.
 
-- [ ] **Sentiment / news signal** — consume a REST or WebSocket news feed (e.g. Benzinga, CryptoPanic), run keyword scoring (+/− words), emit a `SentimentSignal` on the event bus within 50 ms of headline. Add `NewsParser` in `crates/market/src/news.rs` and `SentimentStrategy` in `crates/strategy/src/sentiment.rs`.
+- [x] **Sentiment / news signal** — consume a REST or WebSocket news feed (e.g. Benzinga, CryptoPanic), run keyword scoring (+/− words), emit a `SentimentSignal` on the event bus within 50 ms of headline. `NewsParser` in `crates/market/src/news.rs` scores headlines, and `SentimentStrategy` in `crates/strategy/src/sentiment.rs` converts fresh high-confidence sentiment into signals.
 
 ---
 
@@ -111,7 +111,7 @@ This file tracks what comes next.
 18. ~~Regime detection (HMM)~~ ✅
 19. ~~Liquidity probing~~ ✅
 20. ~~Online learning (ML fallback)~~ ✅
-21. Sentiment / news signal
+21. ~~Sentiment / news signal~~ ✅
 22. Full LOB CNN input
 23. `Arc<BookUpdate>` bus optimization
 24. Feed reconnect tests
@@ -146,7 +146,7 @@ This file tracks what comes next.
 | Regime Detection (HMM) | ✅ HmmFilter online forward filter |
 | Liquidity Detection / Probing | ✅ LiquidityProber quick-fill scale-in |
 | Online Learning (SGD) | ✅ OnlineClassifier fallback |
-| Sentiment / News Signal | 📋 #21 |
+| Sentiment / News Signal | ✅ NewsParser + SentimentStrategy |
 | Full LOB CNN | 📋 #22 |
 | RL Quote Placement (DQN) | 📋 #26 |
 | Quote Stuffing | ❌ unethical/illegal — not implementing |

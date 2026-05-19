@@ -112,7 +112,9 @@ impl Player {
 
                 // Parse event and publish
                 let payload_json = payload_col.value(i);
-                if let Some(event) = self.parse_event(id, timestamp, event_type, symbol, payload_json) {
+                if let Some(event) =
+                    self.parse_event(id, timestamp, event_type, symbol, payload_json)
+                {
                     let _ = event_bus.publish(event);
                     count += 1;
                 }
@@ -147,6 +149,7 @@ impl Player {
                 | (EventPayload::RiskAlert(_), "risk_alert")
                 | (EventPayload::LatencyReport(_), "latency_report")
                 | (EventPayload::MLPrediction(_), "ml_prediction")
+                | (EventPayload::SentimentSignal(_), "sentiment_signal")
         );
 
         if !type_matches {

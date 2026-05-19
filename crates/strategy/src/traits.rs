@@ -1,6 +1,6 @@
 //! Strategy trait definition.
 
-use mercury_core::{Fill, OrderBook, Signal, StrategyId, Trade};
+use mercury_core::{Fill, OrderBook, SentimentSignal, Signal, StrategyId, Trade};
 
 /// Trait for trading strategies.
 ///
@@ -22,6 +22,11 @@ pub trait Strategy: Send + Sync {
 
     /// Called when an order is filled.
     fn on_fill(&mut self, fill: &Fill);
+
+    /// Called when a news sentiment signal is published.
+    fn on_sentiment(&mut self, _signal: &SentimentSignal) -> Vec<Signal> {
+        vec![]
+    }
 
     /// Reset the strategy state.
     fn reset(&mut self);
