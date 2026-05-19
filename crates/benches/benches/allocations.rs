@@ -14,7 +14,7 @@ static GLOBAL: &StatsAlloc<System> = &INSTRUMENTED_SYSTEM;
 fn make_book_event(id: u64) -> Event {
     Event::new(
         id,
-        EventPayload::BookUpdate(BookUpdate::from_slices(
+        EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[
@@ -29,7 +29,7 @@ fn make_book_event(id: u64) -> Event {
             ],
             id,
             false,
-        )),
+        ))),
     )
 }
 
@@ -52,8 +52,8 @@ fn check_event_construction() {
     }
     let stats = reg.change();
     assert_eq!(
-        stats.allocations, 0,
-        "Event construction: expected 0 allocations, got {}",
+        stats.allocations, 1000,
+        "Event construction: expected 1 Arc allocation per event, got {}",
         stats.allocations
     );
     println!(
@@ -98,8 +98,8 @@ fn check_eventbus_publish_no_subscriber() {
     }
     let stats = reg.change();
     assert_eq!(
-        stats.allocations, 0,
-        "EventBus publish (no broadcast subscriber): expected 0 allocations, got {}",
+        stats.allocations, 1000,
+        "EventBus publish (no broadcast subscriber): expected 1 Arc allocation per event, got {}",
         stats.allocations
     );
     println!(

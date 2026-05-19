@@ -10,7 +10,7 @@ use std::sync::Arc;
 fn make_book_event(seq: u64) -> Event {
     Event::new(
         seq,
-        EventPayload::BookUpdate(BookUpdate::from_slices(
+        EventPayload::BookUpdate(Arc::new(BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[
@@ -23,7 +23,7 @@ fn make_book_event(seq: u64) -> Event {
             ],
             seq,
             false,
-        )),
+        ))),
     )
 }
 
@@ -38,14 +38,14 @@ fn bench_strategy_process(c: &mut Criterion) {
     // Pre-warm the order book with a snapshot
     let snapshot = Event::new(
         0,
-        EventPayload::BookUpdate(BookUpdate::from_slices(
+        EventPayload::BookUpdate(Arc::new(BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[Level::new(dec!(80000), dec!(1.0))],
             &[Level::new(dec!(80001), dec!(1.0))],
             0,
             true,
-        )),
+        ))),
     );
     runner.process(&snapshot);
 

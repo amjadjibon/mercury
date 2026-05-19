@@ -150,8 +150,8 @@ mod tests {
         let binance_update = make_update(Exchange::Binance, dec!(50000), dec!(50010));
         let coinbase_update = make_update(Exchange::Coinbase, dec!(49990), dec!(50005));
 
-        let binance_event = mercury_core::Event::new(1, EventPayload::BookUpdate(binance_update));
-        let coinbase_event = mercury_core::Event::new(2, EventPayload::BookUpdate(coinbase_update));
+        let binance_event = mercury_core::Event::new(1, EventPayload::BookUpdate(Arc::new(binance_update)));
+        let coinbase_event = mercury_core::Event::new(2, EventPayload::BookUpdate(Arc::new(coinbase_update)));
 
         // Manually populate cache (no gateways registered, use update_bbo directly)
         sor.update_bbo(match &binance_event.payload {

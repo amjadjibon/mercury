@@ -65,7 +65,9 @@ impl YahooFeed {
                                     event_id += 1;
                                     let book_event = mercury_core::Event::new(
                                         event_id,
-                                        mercury_core::EventPayload::BookUpdate(book_update),
+                                        mercury_core::EventPayload::BookUpdate(
+                                            std::sync::Arc::new(book_update),
+                                        ),
                                     );
                                     let _ = event_bus.publish(book_event);
 

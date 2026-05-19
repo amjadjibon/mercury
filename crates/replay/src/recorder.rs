@@ -192,14 +192,14 @@ mod tests {
         let event = Event {
             id: 1,
             timestamp: 1234567890,
-            payload: EventPayload::BookUpdate(BookUpdate::from_slices(
+            payload: EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
                 Exchange::Binance,
                 Symbol::new("BTCUSDT"),
                 &[Level::new(dec!(50000), dec!(1.0))],
                 &[Level::new(dec!(50001), dec!(1.0))],
                 1,
                 false,
-            )),
+            ))),
         };
 
         recorder.record(event).unwrap();

@@ -2,6 +2,7 @@
 
 use crate::types::*;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Unique event identifier.
 pub type EventId = u64;
@@ -32,7 +33,7 @@ impl Event {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EventPayload {
     /// Order book update.
-    BookUpdate(BookUpdate),
+    BookUpdate(Arc<BookUpdate>),
     /// Trade execution from market data.
     Trade(Trade),
     /// Trading signal from strategy.

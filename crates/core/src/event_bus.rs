@@ -113,14 +113,14 @@ mod tests {
 
         let event = Event::new(
             bus.next_id(),
-            EventPayload::BookUpdate(BookUpdate::from_slices(
+            EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
                 Exchange::Binance,
                 Symbol::new("BTCUSDT"),
                 &[],
                 &[],
                 1,
                 true,
-            )),
+            ))),
         );
 
         bus.publish(event.clone()).unwrap();
@@ -136,14 +136,14 @@ mod tests {
 
         let event = Event::new(
             bus.next_id(),
-            EventPayload::BookUpdate(BookUpdate::from_slices(
+            EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
                 Exchange::Binance,
                 Symbol::new("BTCUSDT"),
                 &[],
                 &[],
                 1,
                 true,
-            )),
+            ))),
         );
 
         bus.publish(event.clone()).unwrap();
@@ -165,14 +165,14 @@ mod tests {
         let make = |id| {
             Event::new(
                 id,
-                EventPayload::BookUpdate(BookUpdate::from_slices(
+                EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
                     Exchange::Binance,
                     Symbol::new("BTCUSDT"),
                     &[],
                     &[],
                     id,
                     false,
-                )),
+                ))),
             )
         };
 

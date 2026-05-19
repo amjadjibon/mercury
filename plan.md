@@ -81,7 +81,7 @@ This file tracks what comes next.
 
 - [ ] **`SO_TIMESTAMPING` NIC timestamps** — parse `cmsg` ancillary data on the receive socket to get hardware NIC timestamp. Measures wire-to-strategy latency independent of `gettimeofday`. Linux only. File: `crates/market/src/feed.rs`.
 
-- [ ] **`Arc<BookUpdate>` on event bus** — `BookUpdate` is 480 bytes; with 4 subscribers each copy costs ~1920 bytes per tick. Wrap in `Arc` so the bus stores one copy and subscribers share it. Change `EventPayload::BookUpdate(BookUpdate)` to `EventPayload::BookUpdate(Arc<BookUpdate>)`. File: `crates/core/src/events.rs`.
+- [x] **`Arc<BookUpdate>` on event bus** — `BookUpdate` is 480 bytes; with 4 subscribers each copy costs ~1920 bytes per tick. `EventPayload::BookUpdate` now stores `Arc<BookUpdate>` so the bus stores one update and subscribers share it.
 
 - [x] **WebSocket fill delivery** — Binance `listenKey` + user data stream implemented in `crates/gateway/src/binance.rs`. Parses `executionReport` events with `execType=TRADE`. Keepalive task runs every 30 min.
 
@@ -113,7 +113,7 @@ This file tracks what comes next.
 20. ~~Online learning (ML fallback)~~ ✅
 21. ~~Sentiment / news signal~~ ✅
 22. ~~Full LOB CNN input~~ ✅
-23. `Arc<BookUpdate>` bus optimization
+23. ~~`Arc<BookUpdate>` bus optimization~~ ✅
 24. Feed reconnect tests
 25. `SO_BUSY_POLL` + NIC timestamps (Linux only)
 26. RL quote placement (research-grade)

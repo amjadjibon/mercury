@@ -7,14 +7,14 @@ use rust_decimal_macros::dec;
 fn create_event(id: u64) -> Event {
     Event::new(
         id,
-        EventPayload::BookUpdate(BookUpdate::from_slices(
+        EventPayload::BookUpdate(std::sync::Arc::new(BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
             &[Level::new(dec!(50000), dec!(1.0))],
             &[Level::new(dec!(50001), dec!(1.0))],
             id,
             false,
-        )),
+        ))),
     )
 }
 

@@ -434,7 +434,7 @@ mod tests {
             let fills = exchange.on_book_update(&upd);
             fills_collected += fills.len();
 
-            let event = Event::new(seq, EventPayload::BookUpdate(upd));
+            let event = Event::new(seq, EventPayload::BookUpdate(Arc::new(upd)));
             let signals = runner.process(&event);
 
             for signal in signals {

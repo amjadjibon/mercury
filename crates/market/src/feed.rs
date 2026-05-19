@@ -165,7 +165,7 @@ impl FeedManager {
     fn to_event(event_bus: &EventBus, msg: FeedMessage) -> Option<Event> {
         let payload = match msg {
             FeedMessage::DepthSnapshot(update) | FeedMessage::DepthUpdate(update) => {
-                EventPayload::BookUpdate(update)
+                EventPayload::BookUpdate(std::sync::Arc::new(update))
             }
             FeedMessage::Trade(trade) => EventPayload::Trade(trade),
             FeedMessage::Ping | FeedMessage::Pong => return None,
