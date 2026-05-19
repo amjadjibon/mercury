@@ -20,7 +20,9 @@ pub use features::{
     EXTENDED_FEATURE_COUNT, FEATURE_COUNT, FeatureComputer, HawkesIntensity, VolumeEstimator,
 };
 pub use indicators::{Atr, Ema, Macd, Rsi, Sma, Window};
-pub use inference_strategy::InferenceStrategy;
+pub use inference_strategy::{
+    InferenceStrategy, OnlineClassifier, OnlineClassifierConfig, OnlineLearningConfig,
+};
 pub use market_maker::MarketMaker;
 pub use momentum::Momentum;
 pub use obi::ObiStrategy;

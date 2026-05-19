@@ -67,7 +67,7 @@ This file tracks what comes next.
 
 ## ML Pipeline
 
-- [ ] **Online learning** — update logistic regression weights incrementally with each new labeled tick (SGD). Avoids full retraining when market regime shifts. Add `OnlineClassifier` in `crates/strategy/src/inference_strategy.rs` as a fallback when no ONNX model is loaded.
+- [x] **Online learning** — update logistic regression weights incrementally with each new labeled tick (SGD). `OnlineClassifier` in `crates/strategy/src/inference_strategy.rs` provides a softmax logistic fallback when no ONNX model is loaded, using delayed book ticks for self-labeling.
 
 - [ ] **Full LOB snapshot as CNN input** — replace 10-scalar feature vector with 20-level bid+ask volume profile fed into a 1D conv net. Requires generating a new ONNX model with input shape `[1, 2, 20]`. Update `FeatureComputer` in `crates/strategy/src/features.rs`.
 
@@ -110,7 +110,7 @@ This file tracks what comes next.
 17. ~~Hawkes process~~ ✅
 18. ~~Regime detection (HMM)~~ ✅
 19. ~~Liquidity probing~~ ✅
-20. Online learning (ML fallback)
+20. ~~Online learning (ML fallback)~~ ✅
 21. Sentiment / news signal
 22. Full LOB CNN input
 23. `Arc<BookUpdate>` bus optimization
@@ -145,7 +145,7 @@ This file tracks what comes next.
 | Hawkes Process (Order Flow) | ✅ HawkesIntensity extended feature |
 | Regime Detection (HMM) | ✅ HmmFilter online forward filter |
 | Liquidity Detection / Probing | ✅ LiquidityProber quick-fill scale-in |
-| Online Learning (SGD) | 📋 #20 |
+| Online Learning (SGD) | ✅ OnlineClassifier fallback |
 | Sentiment / News Signal | 📋 #21 |
 | Full LOB CNN | 📋 #22 |
 | RL Quote Placement (DQN) | 📋 #26 |
