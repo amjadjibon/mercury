@@ -2564,6 +2564,7 @@ dependencies = [
  "mercury-core",
  "mercury-gateway",
  "mercury-risk",
+ "mercury-strategy",
  "parking_lot",
  "rust_decimal",
  "rust_decimal_macros",

@@ -74,3 +74,62 @@ impl Default for ExecutionMetrics {
         Self::new(1000)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mercury_core::{Exchange, Fill, Side, Symbol};
+    use rust_decimal_macros::dec;
+
+    fn make_fill(price: rust_decimal::Decimal, qty: rust_decimal::Decimal, ts: Timestamp) -> Fill {
+        Fill {
+            order_id: 0,
+            symbol: Symbol::new("BTCUSDT"),
+            exchange: Exchange::Binance,
+            side: Side::Buy,
+            price,
+            quantity: qty,
+            fee: dec!(0),
+            fee_asset: "USDT".into(),
+            is_maker: false,
+            trade_id: 0,
+            timestamp: ts,
+        }
+    }
+
+    #[test]
+    fn test_slippage_bps() {
+        let m = ExecutionMetrics::new(10);
+        let fill = make_fill(dec!(50010), dec!(1), 1000);
+        m.record_fill(&fill, dec!(50000), 900);
+        // slippage = |50010 - 50000| / 50000 * 10000 = 2 bps
+        assert_eq!(m.avg_slippage_bps(), dec!(2));
+    }
+
+    #[test]
+    fn test_latency_ns() {
+        let m = ExecutionMetrics::new(10);
+        let fill = make_fill(dec!(50000), dec!(1), 1500);
+        m.record_fill(&fill, dec!(50000), 1000);
+        assert_eq!(m.avg_latency_ns(), 500);
+    }
+
+    #[test]
+    fn test_window_eviction() {
+        let m = ExecutionMetrics::new(3);
+        for i in 0..5u64 {
+            let fill = make_fill(dec!(50000), dec!(1), i as i64 + 1);
+            m.record_fill(&fill, dec!(50000), i as i64);
+        }
+        // window_size = 3, fill_count should be capped at 3
+        assert_eq!(m.fill_count(), 3);
+    }
+
+    #[test]
+    fn test_empty_metrics() {
+        let m = ExecutionMetrics::new(10);
+        assert_eq!(m.avg_slippage_bps(), dec!(0));
+        assert_eq!(m.avg_latency_ns(), 0);
+        assert_eq!(m.fill_count(), 0);
+    }
+}

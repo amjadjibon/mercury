@@ -18,6 +18,8 @@ pub struct OrderBook {
     /// Asks sorted ascending (best ask first = index 0).
     asks: Vec<Level>,
     pub sequence: u64,
+    /// Cached mid-price; updated on every `apply_update` to avoid recomputation.
+    cached_mid: Option<Price>,
 }
 
 impl OrderBook {
@@ -28,6 +30,7 @@ impl OrderBook {
             bids: Vec::with_capacity(32),
             asks: Vec::with_capacity(32),
             sequence: 0,
+            cached_mid: None,
         }
     }
 
@@ -45,6 +48,12 @@ impl OrderBook {
         }
 
         self.sequence = update.sequence;
+
+        // Recompute cached mid after every update.
+        self.cached_mid = match (self.bids.first(), self.asks.first()) {
+            (Some(bid), Some(ask)) => Some((bid.price + ask.price) / Decimal::TWO),
+            _ => None,
+        };
     }
 
     pub fn best_bid(&self) -> Option<Level> {
@@ -56,10 +65,7 @@ impl OrderBook {
     }
 
     pub fn mid_price(&self) -> Option<Price> {
-        match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => Some((bid.price + ask.price) / Decimal::TWO),
-            _ => None,
-        }
+        self.cached_mid
     }
 
     pub fn spread(&self) -> Option<Price> {

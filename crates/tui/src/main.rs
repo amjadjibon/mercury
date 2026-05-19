@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Tabs},
 };
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
@@ -30,9 +30,9 @@ use widgets::{ChartWidget, DepthWidget};
 #[derive(Parser)]
 #[command(name = "mercury-tui", about = "Mercury TUI monitor")]
 struct Args {
-    /// Symbol to monitor (e.g. BTCUSDT, ETHUSDT)
-    #[arg(short, long, default_value = "BTCUSDT")]
-    symbol: String,
+    /// Symbol(s) to monitor — repeat for multiple: -s BTCUSDT -s ETHUSDT
+    #[arg(short, long, required = true)]
+    symbol: Vec<String>,
 
     /// Exchange (binance, coinbase)
     #[arg(short, long, default_value = "binance")]
@@ -60,7 +60,7 @@ impl FillEntry {
     }
 }
 
-struct App {
+struct SymbolTab {
     book: OrderBook,
     symbol: Symbol,
     pnl_tracker: PnLTracker,
@@ -71,13 +71,12 @@ struct App {
     price_history: Vec<(f64, f64)>,
     pnl_history: Vec<(f64, f64)>,
     fills: Vec<FillEntry>,
-    kill_switch: bool,
     start_time: std::time::Instant,
     latency_p50: u64,
     latency_p99: u64,
 }
 
-impl App {
+impl SymbolTab {
     fn new(symbol: Symbol, exchange: Exchange) -> Self {
         Self {
             book: OrderBook::new(exchange, symbol),
@@ -90,7 +89,6 @@ impl App {
             price_history: Vec::with_capacity(200),
             pnl_history: Vec::with_capacity(200),
             fills: Vec::new(),
-            kill_switch: false,
             start_time: std::time::Instant::now(),
             latency_p50: 0,
             latency_p99: 0,
@@ -162,13 +160,45 @@ impl App {
     }
 }
 
+struct App {
+    tabs: Vec<SymbolTab>,
+    selected: usize,
+    kill_switch: bool,
+}
+
+impl App {
+    fn new(symbols: Vec<Symbol>, exchange: Exchange) -> Self {
+        let tabs = symbols
+            .into_iter()
+            .map(|s| SymbolTab::new(s, exchange))
+            .collect();
+        Self { tabs, selected: 0, kill_switch: false }
+    }
+
+    fn active(&self) -> &SymbolTab {
+        &self.tabs[self.selected]
+    }
+
+    fn next_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.selected = (self.selected + 1) % self.tabs.len();
+        }
+    }
+
+    fn prev_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.selected = self.selected.checked_sub(1).unwrap_or(self.tabs.len() - 1);
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
-    let symbol = Symbol::new(&args.symbol);
     let exchange = match args.exchange.to_lowercase().as_str() {
         "coinbase" => Exchange::Coinbase,
         _ => Exchange::Binance,
     };
+    let symbols: Vec<Symbol> = args.symbol.iter().map(|s| Symbol::new(s)).collect();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -176,7 +206,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(symbol, exchange);
+    let mut app = App::new(symbols, exchange);
 
     let ipc_client = IpcClient::new(std::path::PathBuf::from("/tmp/mercury.sock"));
     let (tx, rx) = tokio::sync::mpsc::channel::<mercury_core::Event>(256);
@@ -216,26 +246,40 @@ fn run_app(
         while let Ok(event) = rx.try_recv() {
             match event.payload {
                 mercury_core::EventPayload::BookUpdate(update) => {
-                    app.book.apply_update(&update);
-                    if let Some(mid) = app.book.mid_price() {
-                        if let Some(p) = mid.to_f64() {
-                            app.on_price(p);
+                    // Route to the matching symbol tab.
+                    for tab in app.tabs.iter_mut() {
+                        if tab.symbol == update.symbol {
+                            tab.book.apply_update(&update);
+                            if let Some(mid) = tab.book.mid_price() {
+                                if let Some(p) = mid.to_f64() {
+                                    tab.on_price(p);
+                                }
+                                tab.unrealized_pnl = tab.pnl_tracker.unrealized_pnl(tab.symbol, mid);
+                            }
                         }
-                        app.unrealized_pnl =
-                            app.pnl_tracker.unrealized_pnl(app.symbol, mid);
                     }
                 }
                 mercury_core::EventPayload::Fill(fill) => {
-                    app.on_fill(&fill);
+                    for tab in app.tabs.iter_mut() {
+                        if tab.symbol == fill.symbol {
+                            tab.on_fill(&fill);
+                        }
+                    }
                 }
                 mercury_core::EventPayload::Trade(trade) => {
-                    if let Some(p) = trade.price.to_f64() {
-                        app.on_price(p);
+                    for tab in app.tabs.iter_mut() {
+                        if tab.symbol == trade.symbol {
+                            if let Some(p) = trade.price.to_f64() {
+                                tab.on_price(p);
+                            }
+                        }
                     }
                 }
                 mercury_core::EventPayload::LatencyReport(report) => {
-                    app.latency_p50 = report.p50_ns;
-                    app.latency_p99 = report.p99_ns;
+                    for tab in app.tabs.iter_mut() {
+                        tab.latency_p50 = report.p50_ns;
+                        tab.latency_p99 = report.p99_ns;
+                    }
                 }
                 _ => {}
             }
@@ -249,6 +293,8 @@ fn run_app(
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('k') => app.kill_switch = !app.kill_switch,
+                        KeyCode::Right | KeyCode::Char('l') => app.next_tab(),
+                        KeyCode::Left | KeyCode::Char('h') => app.prev_tab(),
                         _ => {}
                     }
                 }
@@ -273,21 +319,37 @@ fn ui(f: &mut Frame, app: &App) {
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),      // Header
-            Constraint::Percentage(45), // Chart + Fill Log
-            Constraint::Percentage(38), // Order Book + Depth
+            Constraint::Length(3),      // Tab bar
+            Constraint::Length(3),      // Header / price line
+            Constraint::Percentage(43), // Chart + Fill Log
+            Constraint::Percentage(36), // Order Book + Depth
             Constraint::Length(6),      // Stats
         ])
         .split(area);
 
+    // ── Tab bar ──────────────────────────────────────────────────────────────
+    let tab_titles: Vec<Line> = app
+        .tabs
+        .iter()
+        .map(|t| Line::from(t.symbol.as_str().to_string()))
+        .collect();
+    let tabs_widget = Tabs::new(tab_titles)
+        .select(app.selected)
+        .block(Block::default().borders(Borders::ALL).title("Symbols  ← h/l →"))
+        .style(Style::default().fg(Color::DarkGray))
+        .highlight_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+    f.render_widget(tabs_widget, chunks[0]);
+
+    let tab = app.active();
+
     // ── Header ──────────────────────────────────────────────────────────────
-    let spread_str = app
+    let spread_str = tab
         .book
         .spread_bps()
         .map(|s| format!("{:.2} bps", s))
         .unwrap_or_else(|| "–".to_string());
 
-    let mid_str = app
+    let mid_str = tab
         .book
         .mid_price()
         .map(|m| format!("{:.2}", m))
@@ -302,39 +364,39 @@ fn ui(f: &mut Frame, app: &App) {
     let header = Paragraph::new(Line::from(vec![
         Span::styled("Mercury ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::raw("| "),
-        Span::styled(app.book.symbol.as_str(), Style::default().fg(Color::Yellow)),
+        Span::styled(tab.book.symbol.as_str(), Style::default().fg(Color::Yellow)),
         Span::raw("  mid "),
         Span::styled(mid_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
         Span::raw("  spread "),
         Span::styled(spread_str, Style::default().fg(Color::Cyan)),
         Span::raw("  fills "),
-        Span::styled(app.fills.len().to_string(), Style::default().fg(Color::White)),
+        Span::styled(tab.fills.len().to_string(), Style::default().fg(Color::White)),
         Span::raw("  "),
         kill_span,
         Span::styled("  q: quit", Style::default().fg(Color::DarkGray)),
     ]))
     .block(Block::default().borders(Borders::ALL).title("Mercury Paper Trading"));
-    f.render_widget(header, chunks[0]);
+    f.render_widget(header, chunks[1]);
 
     // ── Chart + Fill Log ────────────────────────────────────────────────────
     let top = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(65), Constraint::Percentage(35)])
-        .split(chunks[1]);
+        .split(chunks[2]);
 
     let chart_area = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
         .split(top[0]);
 
-    let price_chart = ChartWidget::new(&app.price_history, "Mid Price", Color::Cyan);
+    let price_chart = ChartWidget::new(&tab.price_history, "Mid Price", Color::Cyan);
     f.render_widget(price_chart.render(), chart_area[0]);
 
-    let pnl_line_color = if app.total_pnl() >= Decimal::ZERO { Color::Green } else { Color::Red };
-    let pnl_chart = ChartWidget::new(&app.pnl_history, "PnL (USDT)", pnl_line_color);
+    let pnl_line_color = if tab.total_pnl() >= Decimal::ZERO { Color::Green } else { Color::Red };
+    let pnl_chart = ChartWidget::new(&tab.pnl_history, "PnL (USDT)", pnl_line_color);
     f.render_widget(pnl_chart.render(), chart_area[1]);
 
-    let fill_items: Vec<ListItem> = app
+    let fill_items: Vec<ListItem> = tab
         .fills
         .iter()
         .rev()
@@ -355,14 +417,14 @@ fn ui(f: &mut Frame, app: &App) {
     let bottom = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(chunks[2]);
+        .split(chunks[3]);
 
     let book_halves = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(bottom[0]);
 
-    let bid_rows: Vec<Row> = app
+    let bid_rows: Vec<Row> = tab
         .book
         .top_bids(12)
         .iter()
@@ -379,7 +441,7 @@ fn ui(f: &mut Frame, app: &App) {
         book_halves[0],
     );
 
-    let ask_rows: Vec<Row> = app
+    let ask_rows: Vec<Row> = tab
         .book
         .top_asks(12)
         .iter()
@@ -396,57 +458,57 @@ fn ui(f: &mut Frame, app: &App) {
         book_halves[1],
     );
 
-    let depth_bids = app.book.top_bids(50);
-    let depth_asks = app.book.top_asks(50);
+    let depth_bids = tab.book.top_bids(50);
+    let depth_asks = tab.book.top_asks(50);
     f.render_widget(DepthWidget::new(&depth_bids, &depth_asks).render(), bottom[1]);
 
     // ── Stats ────────────────────────────────────────────────────────────────
-    let pos_color = if app.position > Decimal::ZERO {
+    let pos_color = if tab.position > Decimal::ZERO {
         Color::Green
-    } else if app.position < Decimal::ZERO {
+    } else if tab.position < Decimal::ZERO {
         Color::Red
     } else {
         Color::Gray
     };
 
-    let avg_entry_str = app
+    let avg_entry_str = tab
         .avg_entry()
         .map(|p| format!("{:.2}", p))
         .unwrap_or_else(|| "–".to_string());
 
-    let uptime = app.start_time.elapsed().as_secs();
+    let uptime = tab.start_time.elapsed().as_secs();
     let uptime_str = format!("{:02}:{:02}:{:02}", uptime / 3600, (uptime % 3600) / 60, uptime % 60);
 
     let stats = Paragraph::new(vec![
         Line::from(vec![
             Span::raw("Position : "),
-            Span::styled(format!("{:+.4} BTC", app.position), Style::default().fg(pos_color).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:+.4}", tab.position), Style::default().fg(pos_color).add_modifier(Modifier::BOLD)),
             Span::raw("   Avg Entry : "),
             Span::styled(avg_entry_str, Style::default().fg(Color::Yellow)),
         ]),
         Line::from(vec![
             Span::raw("Realized : "),
-            Span::styled(format!("{:+.4} USDT", app.realized_pnl), Style::default().fg(pnl_color(app.realized_pnl)).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:+.4} USDT", tab.realized_pnl), Style::default().fg(pnl_color(tab.realized_pnl)).add_modifier(Modifier::BOLD)),
             Span::raw("   Unrealized : "),
-            Span::styled(format!("{:+.4} USDT", app.unrealized_pnl), Style::default().fg(pnl_color(app.unrealized_pnl)).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:+.4} USDT", tab.unrealized_pnl), Style::default().fg(pnl_color(tab.unrealized_pnl)).add_modifier(Modifier::BOLD)),
             Span::raw("   Total : "),
-            Span::styled(format!("{:+.4} USDT", app.total_pnl()), Style::default().fg(pnl_color(app.total_pnl())).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:+.4} USDT", tab.total_pnl()), Style::default().fg(pnl_color(tab.total_pnl())).add_modifier(Modifier::BOLD)),
         ]),
         Line::from(vec![
             Span::raw("Uptime   : "),
             Span::styled(uptime_str, Style::default().fg(Color::Cyan)),
             Span::raw("   Status : "),
             Span::styled(
-                if app.kill_switch { "HALTED" } else if app.price_history.is_empty() { "Connecting..." } else { "Active" },
-                Style::default().fg(if app.kill_switch { Color::Red } else if app.price_history.is_empty() { Color::Yellow } else { Color::Green }),
+                if app.kill_switch { "HALTED" } else if tab.price_history.is_empty() { "Connecting..." } else { "Active" },
+                Style::default().fg(if app.kill_switch { Color::Red } else if tab.price_history.is_empty() { Color::Yellow } else { Color::Green }),
             ),
             Span::raw("   Latency p50/p99 : "),
             Span::styled(
-                format!("{}/{}μs", app.latency_p50 / 1000, app.latency_p99 / 1000),
+                format!("{}/{}μs", tab.latency_p50 / 1000, tab.latency_p99 / 1000),
                 Style::default().fg(Color::Cyan),
             ),
         ]),
     ])
     .block(Block::default().borders(Borders::ALL).title("P&L"));
-    f.render_widget(stats, chunks[3]);
+    f.render_widget(stats, chunks[4]);
 }

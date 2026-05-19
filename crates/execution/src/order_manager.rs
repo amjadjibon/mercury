@@ -231,3 +231,90 @@ impl OrderManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mercury_core::{BookUpdate, Event, EventPayload, Exchange, Level, Symbol};
+    use mercury_risk::{RiskConfig, RiskManager};
+    use mercury_strategy::{MarketMaker, StrategyRunner};
+    use rust_decimal_macros::dec;
+
+    fn book_event(_bus: &EventBus, seq: u64) -> Event {
+        Event::new(
+            seq,
+            EventPayload::BookUpdate(BookUpdate::from_slices(
+                Exchange::Binance,
+                Symbol::new("BTCUSDT"),
+                &[
+                    Level::new(dec!(50000) - rust_decimal::Decimal::from(seq % 5), dec!(1.0)),
+                    Level::new(dec!(49999) - rust_decimal::Decimal::from(seq % 5), dec!(2.0)),
+                ],
+                &[
+                    Level::new(dec!(50001) + rust_decimal::Decimal::from(seq % 5), dec!(1.0)),
+                    Level::new(dec!(50002) + rust_decimal::Decimal::from(seq % 5), dec!(0.5)),
+                ],
+                seq,
+                seq == 0,
+            )),
+        )
+    }
+
+    /// End-to-end: BookUpdate events → MarketMaker signals → SimulatedExchange → fills.
+    ///
+    /// Uses `SimulatedExchange` (synchronous) so the test has no async timing dependencies.
+    #[test]
+    fn test_e2e_pipeline() {
+        use crate::backtest::SimulatedExchange;
+
+        let event_bus = Arc::new(EventBus::new(10_000));
+        let mut runner = StrategyRunner::new(Arc::clone(&event_bus));
+        // Use a tight spread (0.001 = 0.1%) so limit orders are near mid.
+        runner.add_strategy(Box::new(MarketMaker::new(10, dec!(0.001), dec!(1.0))));
+
+        let mut exchange = SimulatedExchange::new(dec!(1_000_000));
+        let mut fills_collected = 0usize;
+
+        for seq in 0u64..=100 {
+            // Oscillate mid between 50000 and 50100 to ensure limits are crossed.
+            let offset = rust_decimal::Decimal::from(seq % 10) * dec!(10);
+            let bid_p = dec!(50000) + offset;
+            let ask_p = bid_p + dec!(1);
+            let upd = BookUpdate::from_slices(
+                Exchange::Binance,
+                Symbol::new("BTCUSDT"),
+                &[Level::new(bid_p, dec!(2.0)), Level::new(bid_p - dec!(1), dec!(3.0))],
+                &[Level::new(ask_p, dec!(2.0)), Level::new(ask_p + dec!(1), dec!(1.5))],
+                seq,
+                seq == 0,
+            );
+
+            // Fills from previous orders.
+            let fills = exchange.on_book_update(&upd);
+            fills_collected += fills.len();
+
+            let event = Event::new(seq, EventPayload::BookUpdate(upd));
+            let signals = runner.process(&event);
+
+            for signal in signals {
+                let order = mercury_core::Order {
+                    id: seq * 100 + fills_collected as u64,
+                    exchange: Exchange::Binance,
+                    symbol: signal.symbol,
+                    side: signal.side,
+                    order_type: signal.order_type,
+                    price: signal.price,
+                    quantity: signal.quantity,
+                    time_in_force: mercury_core::TimeInForce::GTC,
+                    created_at: 0,
+                };
+                exchange.submit_order(order);
+            }
+        }
+
+        assert!(fills_collected > 0, "Expected at least one fill in e2e pipeline");
+        let result = exchange.result();
+        assert!(result.total_trades > 0);
+        assert!(result.total_volume > dec!(0));
+    }
+}
