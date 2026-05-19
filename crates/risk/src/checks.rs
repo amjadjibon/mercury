@@ -48,6 +48,51 @@ pub fn check_rate_limit(timestamps: &[i64], max_per_second: u32) -> Result<(), R
     Ok(())
 }
 
+/// Check intraday trailing drawdown.
+///
+/// Triggers when `session_high - current_pnl > limit`.
+pub fn check_intraday_drawdown(
+    current_pnl: Price,
+    session_high: Price,
+    limit: Price,
+) -> Result<(), RiskViolation> {
+    let drawdown = session_high - current_pnl;
+    if drawdown > limit {
+        return Err(RiskViolation::IntradayDrawdown {
+            drawdown,
+            limit,
+        });
+    }
+    Ok(())
+}
+
+/// Compute Kelly fraction from rolling win statistics.
+///
+/// Returns a multiplier in `[0.0, max_kelly]` for position sizing.
+/// Formula: `f* = win_rate - (1 - win_rate) / win_loss_ratio`
+/// Capped at `max_kelly` (typically 0.25 = quarter Kelly).
+pub fn kelly_fraction(
+    win_count: u32,
+    loss_count: u32,
+    avg_win: Price,
+    avg_loss: Price,
+    max_kelly: Decimal,
+) -> Decimal {
+    let total = win_count + loss_count;
+    if total < 10 || avg_win <= Decimal::ZERO || avg_loss <= Decimal::ZERO {
+        return max_kelly; // not enough data — use full allowance
+    }
+
+    let p = Decimal::from(win_count) / Decimal::from(total);
+    let ratio = avg_win / avg_loss; // win/loss ratio R
+
+    // f* = p - (1-p)/R
+    let kelly = p - (Decimal::ONE - p) / ratio;
+
+    // Clamp to [0, max_kelly]
+    kelly.max(Decimal::ZERO).min(max_kelly)
+}
+
 /// Check inventory skew for market making.
 pub fn calculate_skew(position: Quantity, max_position: Quantity) -> Decimal {
     if max_position == Decimal::ZERO {
@@ -98,5 +143,35 @@ mod tests {
     fn test_daily_loss() {
         assert!(check_daily_loss(dec!(-5000), dec!(-10000)).is_ok());
         assert!(check_daily_loss(dec!(-15000), dec!(-10000)).is_err());
+    }
+
+    #[test]
+    fn test_intraday_drawdown_check() {
+        // drawdown = 500 - 200 = 300 < 400 limit → ok
+        assert!(check_intraday_drawdown(dec!(200), dec!(500), dec!(400)).is_ok());
+        // drawdown = 500 - 50 = 450 > 400 limit → err
+        assert!(check_intraday_drawdown(dec!(50), dec!(500), dec!(400)).is_err());
+        // no session high yet (high = 0, pnl = 0) → ok
+        assert!(check_intraday_drawdown(dec!(0), dec!(0), dec!(500)).is_ok());
+    }
+
+    #[test]
+    fn test_kelly_fraction_capped() {
+        // Extreme edge (100% win rate) → kelly = 1.0 but capped at 0.25
+        let k = kelly_fraction(100, 0, dec!(100), dec!(50), dec!(0.25));
+        assert_eq!(k, dec!(0.25));
+    }
+
+    #[test]
+    fn test_kelly_fraction_negative_edge() {
+        // Losing strategy: win_rate=0.3, R=0.5 → kelly = 0.3 - 0.7/0.5 = 0.3 - 1.4 = -1.1 → clamped to 0
+        let k = kelly_fraction(3, 7, dec!(50), dec!(100), dec!(0.25));
+        assert_eq!(k, dec!(0));
+    }
+
+    #[test]
+    fn test_kelly_insufficient_data() {
+        let k = kelly_fraction(5, 3, dec!(100), dec!(50), dec!(0.25));
+        assert_eq!(k, dec!(0.25)); // fewer than 10 trades → max_kelly
     }
 }

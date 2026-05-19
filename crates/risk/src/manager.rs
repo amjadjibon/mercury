@@ -1,6 +1,9 @@
 //! Risk manager for pre-trade validation.
 
-use crate::checks::{calculate_skew, check_daily_loss, check_position_limit, check_rate_limit};
+use crate::checks::{
+    calculate_skew, check_daily_loss, check_intraday_drawdown, check_position_limit,
+    check_rate_limit, kelly_fraction,
+};
 use crate::kill_switch::KillSwitch;
 use mercury_core::{Fill, Price, Quantity, Side, Signal, Symbol};
 use parking_lot::RwLock;
@@ -25,6 +28,8 @@ pub enum RiskViolation {
     RateLimit { count: u32 },
     #[error("Kill switch is active")]
     KillSwitchActive,
+    #[error("Intraday drawdown limit hit: drawdown={drawdown} limit={limit}")]
+    IntradayDrawdown { drawdown: Price, limit: Price },
 }
 
 /// Risk manager configuration.
@@ -34,10 +39,16 @@ pub struct RiskConfig {
     pub max_position: HashMap<Symbol, Quantity>,
     /// Default max position if not specified.
     pub default_max_position: Quantity,
-    /// Daily loss limit.
+    /// Daily loss limit (negative, e.g. -10000).
     pub daily_loss_limit: Price,
     /// Max orders per second.
     pub max_orders_per_second: u32,
+    /// Intraday trailing drawdown limit in PnL units.
+    /// Halt when `session_high_pnl - current_pnl > intraday_drawdown_limit`.
+    /// Zero disables the check.
+    pub intraday_drawdown_limit: Price,
+    /// Maximum Kelly fraction for position sizing (e.g. 0.25 = quarter Kelly).
+    pub max_kelly: Decimal,
 }
 
 impl Default for RiskConfig {
@@ -47,6 +58,8 @@ impl Default for RiskConfig {
             default_max_position: Decimal::from(10),
             daily_loss_limit: Decimal::from(-10000),
             max_orders_per_second: 10,
+            intraday_drawdown_limit: Decimal::from(2000), // halt if down $2000 from session high
+            max_kelly: Decimal::from_str_exact("0.25").unwrap(),
         }
     }
 }
@@ -62,15 +75,25 @@ struct FillSnapshot {
     timestamp_ns: i64,
 }
 
+/// Outcome of a single closed trade for Kelly calculation.
+#[derive(Debug, Clone)]
+struct TradeOutcome {
+    pnl: Price, // positive = win, negative = loss
+}
+
 /// Risk manager for pre-trade and real-time risk controls.
 pub struct RiskManager {
     config: RiskConfig,
     positions: RwLock<HashMap<Symbol, Quantity>>,
     daily_pnl: RwLock<Price>,
+    /// Highest PnL reached this session — used for trailing drawdown check.
+    session_high_pnl: RwLock<Price>,
     order_timestamps: RwLock<Vec<i64>>,
     kill_switch: Arc<KillSwitch>,
-    /// Recent fills for toxicity detection (capped at 20)
+    /// Recent fills for toxicity detection (capped at 20).
     fill_snapshots: RwLock<Vec<FillSnapshot>>,
+    /// Rolling trade outcomes for Kelly sizing (capped at 100).
+    trade_outcomes: RwLock<Vec<TradeOutcome>>,
 }
 
 impl RiskManager {
@@ -80,9 +103,11 @@ impl RiskManager {
             config,
             positions: RwLock::new(HashMap::new()),
             daily_pnl: RwLock::new(Decimal::ZERO),
+            session_high_pnl: RwLock::new(Decimal::ZERO),
             order_timestamps: RwLock::new(Vec::new()),
             kill_switch: Arc::new(KillSwitch::new()),
             fill_snapshots: RwLock::new(Vec::new()),
+            trade_outcomes: RwLock::new(Vec::new()),
         }
     }
 
@@ -112,6 +137,12 @@ impl RiskManager {
         let pnl = *self.daily_pnl.read();
         check_daily_loss(pnl, self.config.daily_loss_limit)?;
 
+        // Check intraday trailing drawdown
+        if self.config.intraday_drawdown_limit > Decimal::ZERO {
+            let session_high = *self.session_high_pnl.read();
+            check_intraday_drawdown(pnl, session_high, self.config.intraday_drawdown_limit)?;
+        }
+
         // Check rate limit
         let timestamps = self.order_timestamps.read();
         check_rate_limit(&timestamps, self.config.max_orders_per_second)?;
@@ -136,15 +167,71 @@ impl RiskManager {
         );
     }
 
-    /// Update daily PnL.
+    /// Update daily PnL and check trailing drawdown.
     pub fn update_pnl(&self, pnl_change: Price) {
         let mut pnl = self.daily_pnl.write();
         *pnl += pnl_change;
+
+        // Update session high.
+        {
+            let mut high = self.session_high_pnl.write();
+            if *pnl > *high {
+                *high = *pnl;
+            }
+        }
 
         if *pnl < self.config.daily_loss_limit {
             warn!(pnl = %pnl, limit = %self.config.daily_loss_limit, "Daily loss limit breached");
             self.kill_switch.activate();
         }
+
+        // Intraday trailing drawdown check.
+        if self.config.intraday_drawdown_limit > Decimal::ZERO {
+            let session_high = *self.session_high_pnl.read();
+            let drawdown = session_high - *pnl;
+            if drawdown > self.config.intraday_drawdown_limit {
+                warn!(
+                    drawdown = %drawdown,
+                    limit = %self.config.intraday_drawdown_limit,
+                    "Intraday drawdown limit breached"
+                );
+                self.kill_switch.activate();
+            }
+        }
+    }
+
+    /// Record a closed trade outcome for Kelly sizing.
+    /// `pnl` is the realised PnL of the trade (positive = win, negative = loss).
+    pub fn record_trade_outcome(&self, pnl: Price) {
+        let mut outcomes = self.trade_outcomes.write();
+        outcomes.push(TradeOutcome { pnl });
+        if outcomes.len() > 100 {
+            outcomes.remove(0);
+        }
+    }
+
+    /// Compute Kelly fraction from the last 100 trade outcomes.
+    ///
+    /// Returns a multiplier in `[0, max_kelly]` for scaling order quantity.
+    /// Returns `max_kelly` when fewer than 10 trades have been recorded.
+    pub fn kelly_fraction(&self) -> Decimal {
+        let outcomes = self.trade_outcomes.read();
+        let wins: Vec<Price> = outcomes.iter().filter(|o| o.pnl > Decimal::ZERO).map(|o| o.pnl).collect();
+        let losses: Vec<Price> = outcomes.iter().filter(|o| o.pnl < Decimal::ZERO).map(|o| o.pnl.abs()).collect();
+
+        let win_count = wins.len() as u32;
+        let loss_count = losses.len() as u32;
+        let avg_win = if win_count > 0 { wins.iter().sum::<Price>() / Decimal::from(win_count) } else { Decimal::ZERO };
+        let avg_loss = if loss_count > 0 { losses.iter().sum::<Price>() / Decimal::from(loss_count) } else { Decimal::ZERO };
+
+        kelly_fraction(win_count, loss_count, avg_win, avg_loss, self.config.max_kelly)
+    }
+
+    /// Current intraday drawdown (session_high - current_pnl). Zero or positive.
+    pub fn intraday_drawdown(&self) -> Price {
+        let pnl = *self.daily_pnl.read();
+        let high = *self.session_high_pnl.read();
+        (high - pnl).max(Decimal::ZERO)
     }
 
     /// Record an order submission.
@@ -241,11 +328,13 @@ impl RiskManager {
         }
     }
 
-    /// Reset daily state.
+    /// Reset daily state (call at UTC midnight).
     pub fn reset_daily(&self) {
         *self.daily_pnl.write() = Decimal::ZERO;
+        *self.session_high_pnl.write() = Decimal::ZERO;
         self.order_timestamps.write().clear();
         self.fill_snapshots.write().clear();
+        self.trade_outcomes.write().clear();
         self.kill_switch.reset();
     }
 }
@@ -282,6 +371,55 @@ mod tests {
 
         let result = manager.check(&signal);
         assert!(matches!(result, Err(RiskViolation::PositionLimit { .. })));
+    }
+
+    #[test]
+    fn test_intraday_drawdown_halts_trading() {
+        let config = RiskConfig {
+            intraday_drawdown_limit: dec!(500),
+            ..Default::default()
+        };
+        let manager = RiskManager::new(config);
+
+        // Build up a session high of $1000.
+        manager.update_pnl(dec!(1000));
+        assert_eq!(manager.intraday_drawdown(), dec!(0));
+
+        // Drop $600 — exceeds $500 limit.
+        manager.update_pnl(dec!(-600));
+        assert!(manager.kill_switch().is_active(), "kill switch should fire on drawdown");
+        assert_eq!(manager.intraday_drawdown(), dec!(600));
+    }
+
+    #[test]
+    fn test_kelly_fraction_with_history() {
+        let manager = RiskManager::new(RiskConfig::default());
+
+        // 7 wins of $100, 3 losses of $50 → win_rate=0.7, avg_win=100, avg_loss=50
+        // kelly = 0.7 - 0.3/2.0 = 0.7 - 0.15 = 0.55 → capped at 0.25
+        for _ in 0..7 { manager.record_trade_outcome(dec!(100)); }
+        for _ in 0..3 { manager.record_trade_outcome(dec!(-50)); }
+
+        let k = manager.kelly_fraction();
+        assert_eq!(k, dec!(0.25)); // capped at max_kelly
+    }
+
+    #[test]
+    fn test_kelly_returns_max_when_insufficient_data() {
+        let manager = RiskManager::new(RiskConfig::default());
+        // Fewer than 10 trades → return max_kelly (0.25)
+        for _ in 0..5 { manager.record_trade_outcome(dec!(100)); }
+        assert_eq!(manager.kelly_fraction(), dec!(0.25));
+    }
+
+    #[test]
+    fn test_session_high_tracks_peak() {
+        let manager = RiskManager::new(RiskConfig { intraday_drawdown_limit: dec!(0), ..Default::default() });
+        manager.update_pnl(dec!(300));
+        manager.update_pnl(dec!(200));
+        manager.update_pnl(dec!(-100));
+        // session high = 500, current = 400, drawdown = 100
+        assert_eq!(manager.intraday_drawdown(), dec!(100));
     }
 
     #[test]

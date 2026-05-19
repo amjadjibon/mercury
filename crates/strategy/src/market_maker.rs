@@ -1,70 +1,169 @@
-//! Simple market making strategy.
+//! Avellaneda-Stoikov market making strategy.
+//!
+//! Reservation price:  r = mid - q * γ * σ²
+//! Optimal half-spread: δ = (γ * σ²) / 2 + (1/γ) * ln(1 + γ/κ)
+//! bid = r - δ,  ask = r + δ
+//!
+//! Parameters:
+//! - γ (risk_aversion): how aggressively quotes skew with inventory (0.01–1.0)
+//! - κ (order_rate):    proxy for order-arrival depth; higher = tighter spread
+//! - min_spread_bps:    floor on the half-spread regardless of model output
 
 use crate::traits::Strategy;
-use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal, StrategyId};
+use crate::volatility::VolatilityEstimator;
+use mercury_core::{Fill, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Trade};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
-/// Simple market making strategy.
-///
-/// Places bid and ask orders around the mid price with a configurable spread.
-/// Adjusts quotes based on current inventory to manage risk.
+/// Avellaneda-Stoikov market maker with inventory-adjusted reservation price.
 pub struct MarketMaker {
-    /// Target spread in basis points.
-    spread_bps: Decimal,
+    /// Risk-aversion coefficient γ. Higher = wider spread + stronger inventory skew.
+    risk_aversion: Decimal,
+    /// Order-arrival rate proxy κ. Higher = tighter model spread.
+    order_rate: Decimal,
+    /// Minimum half-spread as a fraction of mid (e.g. 0.0001 = 1 bps).
+    min_half_spread: Decimal,
     /// Order size.
     order_size: Quantity,
-    /// Current inventory.
+    /// Current net inventory (positive = long).
     inventory: Quantity,
-    /// Maximum inventory before skewing.
+    /// Maximum inventory — position beyond this is considered maximum skew.
     max_inventory: Quantity,
-    /// Book update counter for throttling quote frequency.
+    /// EMA of squared mid-price returns — rolling variance estimator.
+    variance_ema: Decimal,
+    /// EMA smoothing factor for variance (α = 2/(N+1), N=20).
+    variance_alpha: Decimal,
+    /// Previous mid price for return computation.
+    prev_mid: Option<Decimal>,
+    /// Book update counter for throttling.
     tick_count: u32,
-    /// Requote every N book updates (default 5 = every 500ms at 100ms tick rate).
+    /// Requote every N book updates.
     quote_interval: u32,
+    /// Parkinson volatility estimator — overrides EMA variance when warmed up.
+    vol_estimator: VolatilityEstimator,
 }
 
 impl MarketMaker {
-    /// Create a new market maker.
-    pub fn new(spread_bps: u32, order_size: Quantity, max_inventory: Quantity) -> Self {
+    /// Create a new Avellaneda-Stoikov market maker.
+    ///
+    /// - `min_spread_bps`: floor on total spread in basis points (e.g. 10 = 0.1%)
+    /// - `order_size`: quantity per order
+    /// - `max_inventory`: position at which inventory penalty is maximum
+    pub fn new(min_spread_bps: u32, order_size: Quantity, max_inventory: Quantity) -> Self {
         Self {
-            spread_bps: Decimal::from(spread_bps),
+            risk_aversion: dec!(0.1),
+            order_rate: dec!(1.5),
+            min_half_spread: Decimal::from(min_spread_bps) / dec!(20000), // bps → fraction / 2
             order_size,
             inventory: Decimal::ZERO,
             max_inventory,
+            variance_ema: dec!(0.000001), // seed with tiny non-zero variance
+            variance_alpha: dec!(0.095),  // ≈ EMA(20)
+            prev_mid: None,
             tick_count: 0,
             quote_interval: 5,
+            // 50 ticks/bar × 20 bars — warm up after ~1000 ticks (~1–2 min at typical feed rate).
+            vol_estimator: VolatilityEstimator::new(50, 20),
         }
     }
 
-    /// Set how many book updates to skip between requotes.
+    /// Override risk-aversion γ (default 0.1).
+    pub fn with_risk_aversion(mut self, gamma: Decimal) -> Self {
+        self.risk_aversion = gamma;
+        self
+    }
+
+    /// Override order-arrival rate κ (default 1.5).
+    pub fn with_order_rate(mut self, kappa: Decimal) -> Self {
+        self.order_rate = kappa;
+        self
+    }
+
+    /// Override quote interval (default 5 ticks).
     pub fn with_quote_interval(mut self, interval: u32) -> Self {
         self.quote_interval = interval;
         self
     }
 
-    /// Calculate skew based on current inventory.
-    fn inventory_skew(&self) -> Decimal {
-        if self.max_inventory == Decimal::ZERO {
-            return Decimal::ZERO;
+    /// Update the variance estimate from a new mid price.
+    ///
+    /// Feeds both the Parkinson estimator (preferred, more efficient) and the
+    /// fallback EMA-of-squared-returns. Uses Parkinson once it has ≥2 bars.
+    fn update_variance(&mut self, mid: Decimal) {
+        // Feed Parkinson estimator (uses f64 internally).
+        if let Some(mid_f64) = mid.to_string().parse::<f64>().ok() {
+            self.vol_estimator.update(mid_f64);
         }
-        self.inventory / self.max_inventory
+
+        // Parkinson override when warm.
+        if let Some(park_var) = self.vol_estimator.parkinson_variance() {
+            if park_var.is_finite() && park_var > 0.0 {
+                if let Ok(d) = Decimal::from_str_exact(&format!("{:.10}", park_var)) {
+                    self.variance_ema = d;
+                    self.prev_mid = Some(mid);
+                    return;
+                }
+            }
+        }
+
+        // Fallback: EMA of squared returns.
+        if let Some(prev) = self.prev_mid {
+            if prev > Decimal::ZERO {
+                let ret = (mid - prev) / prev;
+                let sq = ret * ret;
+                self.variance_ema =
+                    self.variance_alpha * sq + (Decimal::ONE - self.variance_alpha) * self.variance_ema;
+            }
+        }
+        self.prev_mid = Some(mid);
     }
 
-    /// Calculate bid price with skew adjustment.
-    fn bid_price(&self, mid: Price) -> Price {
-        let base_spread = mid * self.spread_bps / dec!(10000) / dec!(2);
-        let skew = self.inventory_skew();
-        // Reduce bid when long, increase when short
-        mid - base_spread * (dec!(1) + skew)
+    /// Compute reservation price: r = mid - q * γ * σ²
+    ///
+    /// Inventory q is normalised by max_inventory so the penalty is bounded.
+    fn reservation_price(&self, mid: Decimal) -> Decimal {
+        let q = if self.max_inventory > Decimal::ZERO {
+            self.inventory / self.max_inventory
+        } else {
+            Decimal::ZERO
+        };
+        mid - q * self.risk_aversion * self.variance_ema * mid
     }
 
-    /// Calculate ask price with skew adjustment.
-    fn ask_price(&self, mid: Price) -> Price {
-        let base_spread = mid * self.spread_bps / dec!(10000) / dec!(2);
-        let skew = self.inventory_skew();
-        // Increase ask when long, reduce when short
-        mid + base_spread * (dec!(1) - skew)
+    /// Compute optimal half-spread: δ = (γ·σ²)/2 + (1/γ)·ln(1 + γ/κ)
+    ///
+    /// Falls back to `min_half_spread` if the model output is smaller.
+    fn half_spread(&self, mid: Decimal) -> Decimal {
+        let gamma = self.risk_aversion;
+        let kappa = self.order_rate;
+        let sigma2 = self.variance_ema;
+
+        // γ/κ term — guard against κ = 0
+        let gamma_over_kappa = if kappa > Decimal::ZERO {
+            gamma / kappa
+        } else {
+            gamma
+        };
+
+        // ln(1 + γ/κ) approximation via Taylor: ln(1+x) ≈ x - x²/2 for small x
+        // For larger values we use the series to 4 terms for accuracy without libm.
+        let x = gamma_over_kappa;
+        let ln_term = if x < dec!(0.5) {
+            // ln(1+x) ≈ x - x²/2 + x³/3 - x⁴/4
+            let x2 = x * x;
+            let x3 = x2 * x;
+            let x4 = x3 * x;
+            x - x2 / dec!(2) + x3 / dec!(3) - x4 / dec!(4)
+        } else {
+            // For x >= 0.5: use x/(1 + x/2) as a Padé approximant — good to ~1%
+            x / (Decimal::ONE + x / dec!(2))
+        };
+
+        let model_half_spread = (gamma * sigma2 / dec!(2)) + (Decimal::ONE / gamma) * ln_term;
+
+        // Convert to price units and apply floor
+        let model_fraction = model_half_spread.max(self.min_half_spread);
+        mid * model_fraction
     }
 }
 
@@ -75,17 +174,29 @@ impl Strategy for MarketMaker {
 
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {
         self.tick_count += 1;
-        if self.tick_count % self.quote_interval != 0 {
-            return vec![];
-        }
 
         let mid = match book.mid_price() {
             Some(m) => m,
             None => return vec![],
         };
 
-        let bid_price = self.bid_price(mid);
-        let ask_price = self.ask_price(mid);
+        // Update variance on every tick (not just quote ticks).
+        self.update_variance(mid);
+
+        if self.tick_count % self.quote_interval != 0 {
+            return vec![];
+        }
+
+        let r = self.reservation_price(mid);
+        let delta = self.half_spread(mid);
+
+        let bid_price = r - delta;
+        let ask_price = r + delta;
+
+        // Sanity: bid must be below ask and both positive.
+        if bid_price <= Decimal::ZERO || ask_price <= bid_price {
+            return vec![];
+        }
 
         vec![
             Signal {
@@ -109,7 +220,7 @@ impl Strategy for MarketMaker {
         ]
     }
 
-    fn on_trade(&mut self, _trade: &mercury_core::Trade) -> Vec<Signal> {
+    fn on_trade(&mut self, _trade: &Trade) -> Vec<Signal> {
         vec![]
     }
 
@@ -123,6 +234,9 @@ impl Strategy for MarketMaker {
     fn reset(&mut self) {
         self.inventory = Decimal::ZERO;
         self.tick_count = 0;
+        self.prev_mid = None;
+        self.variance_ema = dec!(0.000001);
+        self.vol_estimator.reset();
     }
 }
 
@@ -132,49 +246,106 @@ mod tests {
     use mercury_core::{BookUpdate, Exchange, Level, Symbol};
     use rust_decimal_macros::dec;
 
-    fn sample_book() -> OrderBook {
+    fn make_book(bid: Decimal, ask: Decimal) -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));
         book.apply_update(&BookUpdate::from_slices(
             Exchange::Binance,
             Symbol::new("BTCUSDT"),
-            &[Level::new(dec!(50000), dec!(1.0))],
-            &[Level::new(dec!(50010), dec!(1.0))],
+            &[Level::new(bid, dec!(1.0))],
+            &[Level::new(ask, dec!(1.0))],
             1,
             true,
         ));
         book
     }
 
-    #[test]
-    fn test_market_maker_signals() {
-        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(1.0)).with_quote_interval(1);
-        let book = sample_book();
-        let signals = mm.on_book(&book);
-
-        assert_eq!(signals.len(), 2);
-        assert_eq!(signals[0].side, Side::Buy);
-        assert_eq!(signals[1].side, Side::Sell);
-    }
-
-    #[test]
-    fn test_inventory_update() {
-        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(1.0));
-
-        let fill = Fill {
+    fn make_fill(side: Side, qty: Decimal) -> Fill {
+        Fill {
             order_id: 1,
             exchange: Exchange::Binance,
             symbol: Symbol::new("BTCUSDT"),
-            side: Side::Buy,
+            side,
             price: dec!(50000),
-            quantity: dec!(0.5),
-            fee: dec!(0.0005),
-            fee_asset: "BNB".to_string(),
+            quantity: qty,
+            fee: dec!(0),
+            fee_asset: "USDT".into(),
             is_maker: true,
             trade_id: 1,
             timestamp: 0,
-        };
+        }
+    }
 
-        mm.on_fill(&fill);
+    #[test]
+    fn test_signals_emitted() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0)).with_quote_interval(1);
+        let book = make_book(dec!(50000), dec!(50010));
+        let signals = mm.on_book(&book);
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].side, Side::Buy);
+        assert_eq!(signals[1].side, Side::Sell);
+        assert!(signals[0].price.unwrap() < signals[1].price.unwrap(), "bid < ask");
+    }
+
+    #[test]
+    fn test_inventory_skew_shifts_quotes() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(1.0))
+            .with_quote_interval(1)
+            .with_risk_aversion(dec!(0.5));
+        let book = make_book(dec!(50000), dec!(50010));
+
+        // Neutral quotes first.
+        let neutral = mm.on_book(&book);
+
+        // Build up long inventory.
+        mm.on_fill(&make_fill(Side::Buy, dec!(0.8)));
+
+        // Force variance to be non-trivial so skew has effect.
+        mm.variance_ema = dec!(0.0001);
+
+        let skewed = mm.on_book(&book);
+
+        let neutral_bid = neutral[0].price.unwrap();
+        let skewed_bid = skewed[0].price.unwrap();
+        let neutral_ask = neutral[1].price.unwrap();
+        let skewed_ask = skewed[1].price.unwrap();
+
+        // Long inventory → reservation price falls → both quotes shift down.
+        assert!(skewed_bid < neutral_bid, "long inventory should lower bid");
+        assert!(skewed_ask < neutral_ask, "long inventory should lower ask");
+    }
+
+    #[test]
+    fn test_wider_spread_on_high_volatility() {
+        let mut mm = MarketMaker::new(1, dec!(0.1), dec!(10.0)).with_quote_interval(1);
+        let book = make_book(dec!(50000), dec!(50010));
+
+        mm.variance_ema = dec!(0.000001);
+        let tight = mm.on_book(&book);
+
+        mm.variance_ema = dec!(0.0010);
+        let wide = mm.on_book(&book);
+
+        let tight_spread = tight[1].price.unwrap() - tight[0].price.unwrap();
+        let wide_spread = wide[1].price.unwrap() - wide[0].price.unwrap();
+        assert!(wide_spread > tight_spread, "high vol → wider spread");
+    }
+
+    #[test]
+    fn test_inventory_tracking() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0));
+        mm.on_fill(&make_fill(Side::Buy, dec!(0.5)));
         assert_eq!(mm.inventory, dec!(0.5));
+        mm.on_fill(&make_fill(Side::Sell, dec!(0.3)));
+        assert_eq!(mm.inventory, dec!(0.2));
+    }
+
+    #[test]
+    fn test_reset_clears_state() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0));
+        mm.on_fill(&make_fill(Side::Buy, dec!(1.0)));
+        mm.variance_ema = dec!(0.001);
+        mm.reset();
+        assert_eq!(mm.inventory, Decimal::ZERO);
+        assert_eq!(mm.prev_mid, None);
     }
 }

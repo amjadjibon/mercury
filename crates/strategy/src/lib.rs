@@ -9,6 +9,7 @@ pub mod momentum;
 pub mod rsi;
 pub mod runner;
 pub mod traits;
+pub mod volatility;
 
 pub use arbitrage::ArbitrageStrategy;
 pub use features::{FeatureComputer, FEATURE_COUNT};
@@ -19,3 +20,4 @@ pub use momentum::Momentum;
 pub use rsi::RsiStrategy;
 pub use runner::StrategyRunner;
 pub use traits::Strategy;
+pub use volatility::VolatilityEstimator;
