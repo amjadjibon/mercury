@@ -17,7 +17,7 @@ This file tracks what comes next.
 
 - [x] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. `HawkesIntensity` lives in `crates/strategy/src/features.rs`; `FeatureComputer::compute_extended()` exposes it as feature 11 while keeping the existing ONNX 10-feature path stable.
 
-- [ ] **Regime detection (HMM)** — 2-state Hidden Markov Model (trending vs mean-reverting). Switch strategy parameters based on detected regime. Add `HmmFilter` in `crates/strategy/src/regime.rs`.
+- [x] **Regime detection (HMM)** — 2-state Hidden Markov Model (trending vs mean-reverting). `HmmFilter` in `crates/strategy/src/regime.rs` runs an online forward filter over return persistence and exposes regime probabilities for strategy parameter switching.
 
 - [x] **Spoofing / iceberg detection** — spoofing: large quote appears then cancels before fill (track cancel-rate per price level). Iceberg: repeated fills at same price despite thin visible qty. Added to `crates/risk/src/manager.rs` as a signal quality filter.
 
@@ -108,7 +108,7 @@ This file tracks what comes next.
 15. ~~Spoofing / iceberg detection~~ ✅
 16. ~~Spread decomposition (TUI metric)~~ ✅
 17. ~~Hawkes process~~ ✅
-18. Regime detection (HMM)
+18. ~~Regime detection (HMM)~~ ✅
 19. Liquidity probing
 20. Online learning (ML fallback)
 21. Sentiment / news signal
@@ -143,7 +143,7 @@ This file tracks what comes next.
 | Iceberg / Spoofing Detection | ✅ risk signal-quality filter |
 | Spread Decomposition | ✅ TUI metric via SpreadDecomposer |
 | Hawkes Process (Order Flow) | ✅ HawkesIntensity extended feature |
-| Regime Detection (HMM) | 📋 #18 |
+| Regime Detection (HMM) | ✅ HmmFilter online forward filter |
 | Liquidity Detection / Probing | 📋 #19 |
 | Online Learning (SGD) | 📋 #20 |
 | Sentiment / News Signal | 📋 #21 |
