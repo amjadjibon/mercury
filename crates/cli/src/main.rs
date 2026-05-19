@@ -401,15 +401,21 @@ async fn run_trading(
         loop {
             match signal_rx.recv_async().await {
                 Ok(event) => {
-                    if let mercury_core::EventPayload::Signal(signal) = event.payload {
-                        match om_clone.submit(signal).await {
-                            Ok(_) => {
-                                metrics::counter!("mercury_orders_submitted_total").increment(1);
-                            }
-                            Err(e) => {
-                                tracing::error!("Order submission failed: {}", e);
+                    match event.payload {
+                        mercury_core::EventPayload::BookUpdate(update) => {
+                            om_clone.on_book_update(&update);
+                        }
+                        mercury_core::EventPayload::Signal(signal) => {
+                            match om_clone.submit(signal).await {
+                                Ok(_) => {
+                                    metrics::counter!("mercury_orders_submitted_total").increment(1);
+                                }
+                                Err(e) => {
+                                    tracing::error!("Order submission failed: {}", e);
+                                }
                             }
                         }
+                        _ => {}
                     }
                 }
                 Err(mercury_core::RecvError::Lagged(n)) => {

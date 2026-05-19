@@ -1,7 +1,9 @@
 //! Order lifecycle management.
 
+use crate::queue_model::{crossed_order, FillProbabilityConfig, FillProbabilityModel};
 use mercury_core::{
-    Event, EventBus, EventPayload, Fill, Order, OrderId, OrderStatus, Signal, Timestamp, now_nanos,
+    BookUpdate, Event, EventBus, EventPayload, Fill, Order, OrderId, OrderStatus, Signal,
+    TimeInForce, Timestamp, now_nanos,
 };
 use mercury_gateway::{ExchangeGateway, GatewayError};
 use mercury_risk::{RiskManager, RiskViolation};
@@ -40,6 +42,7 @@ pub struct OrderManager {
     risk_manager: Arc<RiskManager>,
     gateway: Arc<dyn ExchangeGateway>,
     event_bus: Arc<EventBus>,
+    fill_probability: RwLock<FillProbabilityModel>,
 }
 
 impl OrderManager {
@@ -55,7 +58,15 @@ impl OrderManager {
             risk_manager,
             gateway,
             event_bus,
+            fill_probability: RwLock::new(FillProbabilityModel::new(
+                FillProbabilityConfig::default(),
+            )),
         }
+    }
+
+    /// Update the book snapshot used by fill-probability routing.
+    pub fn on_book_update(&self, update: &BookUpdate) {
+        self.fill_probability.write().apply_book_update(update);
     }
 
     /// Submit a signal as an order.
@@ -74,7 +85,7 @@ impl OrderManager {
 
         // Create order
         let order_id = self.next_order_id.fetch_add(1, Ordering::SeqCst);
-        let order = Order {
+        let mut order = Order {
             id: order_id,
             exchange: self.gateway.exchange(),
             symbol: signal.symbol,
@@ -85,9 +96,16 @@ impl OrderManager {
             time_in_force: signal.time_in_force,
             created_at: now_nanos(),
         };
+        if order.time_in_force != TimeInForce::PostOnly
+            && self.fill_probability.read().should_cross(&order)
+        {
+            debug!(order_id, symbol = %order.symbol, "Converting low-probability limit order to market");
+            order = crossed_order(order);
+        }
 
         // Submit to gateway
         let exchange_order_id = self.gateway.submit_order(&order).await?;
+        self.fill_probability.write().record_order(&order);
 
         info!(
             order_id = order_id,
@@ -162,6 +180,7 @@ impl OrderManager {
     pub fn on_fill(&self, fill: &Fill) {
         // Update risk manager
         self.risk_manager.on_fill(fill);
+        self.fill_probability.write().record_fill(fill);
 
         // Update order state
         let mut orders = self.open_orders.write();

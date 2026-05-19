@@ -59,7 +59,7 @@ This file tracks what comes next.
 
 - [x] **Price impact model (Almgren-Chriss)** — `impact = η · σ · sqrt(Q / ADV)` where ADV is average daily volume. Added to `crates/risk/src/manager.rs` as a configurable pre-trade check using per-symbol ADV/volatility inputs.
 
-- [ ] **Queue position / fill probability** — estimate P(fill) at each price level from queue depth and historical fill rate. Use to choose limit vs market: if P(fill) < 0.4, send market order instead. Add `FillProbabilityModel` in `crates/execution/src/queue_model.rs`.
+- [x] **Queue position / fill probability** — estimate P(fill) at each price level from queue depth and historical fill rate. `FillProbabilityModel` in `crates/execution/src/queue_model.rs` converts eligible low-probability limit orders to IOC market orders when P(fill) < 0.4.
 
 - [ ] **Spread decomposition** — decompose observed spread into: adverse-selection component, inventory component, order-processing cost. Measured via Roll model or Glosten-Harris. Expose as TUI metric. Add to `crates/metrics/`.
 
@@ -104,7 +104,7 @@ This file tracks what comes next.
 11. ~~Inventory skew wired to MarketMaker~~ ✅
 12. ~~Correlation-aware position limits~~ ✅
 13. ~~IOC/FOK + Post-only TIF~~ ✅
-14. Queue position / fill probability
+14. ~~Queue position / fill probability~~ ✅
 15. Spoofing / iceberg detection
 16. Spread decomposition (TUI metric)
 17. Hawkes process
@@ -139,7 +139,7 @@ This file tracks what comes next.
 | Inventory Skew | ✅ RiskManager skew wired to MarketMaker |
 | Correlation Position Limits | ✅ correlation-weighted portfolio delta |
 | IOC / FOK / Post-only | ✅ TIF carried through signals and gateways |
-| Queue / Fill Probability | 📋 #14 |
+| Queue / Fill Probability | ✅ queue-depth model routes low-P(fill) limits to market |
 | Iceberg / Spoofing Detection | 📋 #15 |
 | Spread Decomposition | 📋 #16 |
 | Hawkes Process (Order Flow) | 📋 #17 |
