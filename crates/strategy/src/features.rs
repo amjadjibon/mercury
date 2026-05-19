@@ -2,7 +2,8 @@
 //!
 //! `FeatureComputer` maintains running indicator state and produces a
 //! 10-element `f32` feature vector from each `OrderBook` snapshot and
-//! optionally from `Trade` events for order-flow features.
+//! optionally from `Trade` events for order-flow features. New models can use
+//! `compute_extended()` to include Hawkes trade-arrival intensity as feature 11.
 
 use crate::indicators::{Atr, Ema, Macd, Rsi, Window};
 use mercury_core::{OrderBook, Quantity, Trade};
@@ -11,6 +12,85 @@ use std::collections::VecDeque;
 
 /// Number of features in the output vector.
 pub const FEATURE_COUNT: usize = 10;
+/// Number of features when including Hawkes trade-arrival intensity.
+pub const EXTENDED_FEATURE_COUNT: usize = 11;
+
+/// Self-exciting Hawkes process intensity for short-term trade arrivals.
+///
+/// Intensity is `lambda(t) = mu + sum(alpha * exp(-beta * (t - t_i)))`,
+/// with timestamps expressed in nanoseconds and decay calculated in seconds.
+#[derive(Debug, Clone)]
+pub struct HawkesIntensity {
+    baseline_mu: f64,
+    excitation_alpha: f64,
+    decay_beta: f64,
+    window_secs: f64,
+    event_times_ns: VecDeque<i64>,
+}
+
+impl HawkesIntensity {
+    pub fn new(baseline_mu: f64, excitation_alpha: f64, decay_beta: f64, window_secs: f64) -> Self {
+        assert!(baseline_mu >= 0.0, "baseline_mu must be non-negative");
+        assert!(
+            excitation_alpha >= 0.0,
+            "excitation_alpha must be non-negative"
+        );
+        assert!(decay_beta > 0.0, "decay_beta must be positive");
+        assert!(window_secs > 0.0, "window_secs must be positive");
+        Self {
+            baseline_mu,
+            excitation_alpha,
+            decay_beta,
+            window_secs,
+            event_times_ns: VecDeque::new(),
+        }
+    }
+
+    pub fn on_trade(&mut self, timestamp_ns: i64) -> f64 {
+        self.event_times_ns.push_back(timestamp_ns);
+        self.prune(timestamp_ns);
+        self.intensity_at(timestamp_ns)
+    }
+
+    pub fn intensity_at(&self, timestamp_ns: i64) -> f64 {
+        self.event_times_ns
+            .iter()
+            .filter_map(|event_ns| {
+                let age_secs = (timestamp_ns - *event_ns) as f64 / 1_000_000_000.0;
+                (age_secs >= 0.0 && age_secs <= self.window_secs)
+                    .then_some(self.excitation_alpha * (-self.decay_beta * age_secs).exp())
+            })
+            .sum::<f64>()
+            + self.baseline_mu
+    }
+
+    /// Bounded feature value in `[0, 1)`.
+    pub fn normalized_intensity_at(&self, timestamp_ns: i64) -> f32 {
+        let intensity = self.intensity_at(timestamp_ns).max(0.0);
+        (intensity / (1.0 + intensity)) as f32
+    }
+
+    pub fn reset(&mut self) {
+        self.event_times_ns.clear();
+    }
+
+    fn prune(&mut self, now_ns: i64) {
+        let window_ns = (self.window_secs * 1_000_000_000.0) as i64;
+        while self
+            .event_times_ns
+            .front()
+            .is_some_and(|event_ns| now_ns.saturating_sub(*event_ns) > window_ns)
+        {
+            self.event_times_ns.pop_front();
+        }
+    }
+}
+
+impl Default for HawkesIntensity {
+    fn default() -> Self {
+        Self::new(0.05, 0.75, 1.5, 10.0)
+    }
+}
 
 /// Exponentially weighted average daily volume estimator.
 ///
@@ -86,6 +166,12 @@ impl Default for VolumeEstimator {
 /// | 7 | VWAP deviation ((mid − vwap) / vwap) rolling 100 trades | uncapped |
 /// | 8 | Depth slope (bid_qty[0] − bid_qty[4]) / mid | uncapped |
 /// | 9 | Trade-flow imbalance (buy_vol / total_vol) last 20 trades | \[0, 1\] |
+///
+/// `compute_extended()` appends:
+///
+/// | Index | Feature | Range |
+/// |-------|---------|-------|
+/// | 10 | Hawkes trade-arrival intensity | \[0, 1) |
 #[derive(Debug, Clone)]
 pub struct FeatureComputer {
     rsi: Rsi,
@@ -100,6 +186,8 @@ pub struct FeatureComputer {
     flow_window: VecDeque<(Quantity, Quantity)>,
     flow_buy_sum: Decimal,
     flow_sell_sum: Decimal,
+    hawkes: HawkesIntensity,
+    last_trade_ts: Option<i64>,
 }
 
 const VWAP_WINDOW: usize = 100;
@@ -118,12 +206,16 @@ impl FeatureComputer {
             flow_window: VecDeque::with_capacity(FLOW_WINDOW + 1),
             flow_buy_sum: Decimal::ZERO,
             flow_sell_sum: Decimal::ZERO,
+            hawkes: HawkesIntensity::default(),
+            last_trade_ts: None,
         }
     }
 
     /// Feed a trade to update VWAP and order-flow features.
     pub fn on_trade(&mut self, trade: &Trade) {
         use mercury_core::Side;
+        self.hawkes.on_trade(trade.timestamp);
+        self.last_trade_ts = Some(trade.timestamp);
 
         // VWAP window
         let pv = trade.price * trade.quantity;
@@ -279,6 +371,21 @@ impl FeatureComputer {
         ])
     }
 
+    /// Compute the extended 11-element feature vector.
+    ///
+    /// The first 10 values match `compute()` exactly. Index 10 is bounded
+    /// Hawkes trade-arrival intensity, useful for new models without changing
+    /// the existing ONNX `[1, 10]` inference contract.
+    pub fn compute_extended(&mut self, book: &OrderBook) -> Option<[f32; EXTENDED_FEATURE_COUNT]> {
+        let base = self.compute(book)?;
+        let mut extended = [0.0f32; EXTENDED_FEATURE_COUNT];
+        extended[..FEATURE_COUNT].copy_from_slice(&base);
+        if let Some(ts) = self.last_trade_ts {
+            extended[FEATURE_COUNT] = self.hawkes.normalized_intensity_at(ts);
+        }
+        Some(extended)
+    }
+
     pub fn reset(&mut self) {
         self.rsi.reset();
         self.macd.reset();
@@ -290,6 +397,8 @@ impl FeatureComputer {
         self.flow_window.clear();
         self.flow_buy_sum = Decimal::ZERO;
         self.flow_sell_sum = Decimal::ZERO;
+        self.hawkes.reset();
+        self.last_trade_ts = None;
     }
 }
 
@@ -308,7 +417,7 @@ pub fn to_f32(d: Decimal) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mercury_core::{BookUpdate, Exchange, Level, OrderBook, Symbol};
+    use mercury_core::{BookUpdate, Exchange, Level, OrderBook, Side, Symbol, Trade};
     use rust_decimal_macros::dec;
 
     fn make_book(bid_p: Decimal, bid_q: Decimal, ask_p: Decimal, ask_q: Decimal) -> OrderBook {
@@ -353,6 +462,66 @@ mod tests {
         fc.reset();
         // After reset, VWAP window is empty
         assert!(fc.vwap_window.is_empty());
+    }
+
+    #[test]
+    fn test_hawkes_intensity_rises_and_decays() {
+        let mut hawkes = HawkesIntensity::new(0.05, 1.0, 2.0, 10.0);
+        let t0 = 1_000_000_000_i64;
+
+        let baseline = hawkes.intensity_at(t0);
+        let after_first = hawkes.on_trade(t0);
+        hawkes.on_trade(t0 + 100_000_000);
+        let after_cluster = hawkes.intensity_at(t0 + 100_000_000);
+        let after_decay = hawkes.intensity_at(t0 + 5_000_000_000);
+
+        assert!(after_first > baseline);
+        assert!(after_cluster > after_first);
+        assert!(after_decay < after_cluster);
+        assert!(after_decay > baseline);
+    }
+
+    #[test]
+    fn test_compute_extended_appends_hawkes_feature() {
+        let mut fc = FeatureComputer::new();
+        let book = make_book(dec!(50000), dec!(1.0), dec!(50001), dec!(1.0));
+        let trade = Trade {
+            exchange: Exchange::Binance,
+            symbol: Symbol::new("BTCUSDT"),
+            price: dec!(50000).into(),
+            quantity: dec!(0.5).into(),
+            side: Side::Buy,
+            trade_id: 1,
+            timestamp: 1_000_000_000,
+        };
+
+        fc.on_trade(&trade);
+        let feats = fc.compute_extended(&book).unwrap();
+
+        assert_eq!(feats.len(), EXTENDED_FEATURE_COUNT);
+        assert!(feats[FEATURE_COUNT] > 0.0);
+        assert!(feats[FEATURE_COUNT] < 1.0);
+    }
+
+    #[test]
+    fn test_reset_clears_hawkes_feature() {
+        let mut fc = FeatureComputer::new();
+        let book = make_book(dec!(50000), dec!(1.0), dec!(50001), dec!(1.0));
+        let trade = Trade {
+            exchange: Exchange::Binance,
+            symbol: Symbol::new("BTCUSDT"),
+            price: dec!(50000).into(),
+            quantity: dec!(0.5).into(),
+            side: Side::Buy,
+            trade_id: 1,
+            timestamp: 1_000_000_000,
+        };
+
+        fc.on_trade(&trade);
+        fc.reset();
+        let feats = fc.compute_extended(&book).unwrap();
+
+        assert_eq!(feats[FEATURE_COUNT], 0.0);
     }
 
     #[test]

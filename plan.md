@@ -15,11 +15,11 @@ This file tracks what comes next.
 
 - [x] **Triangular arbitrage** — detect risk-free cycle across three pairs on one exchange. Forward: profit = bid_BTCUSDT × bid_ETHBTC / ask_ETHUSDT − 1. Reverse: profit = bid_ETHUSDT / (ask_BTCUSDT × ask_ETHBTC) − 1. Fires 3 market-order signals when either profit > `min_profit`. `TriangularStrategy` in `crates/strategy/src/triangular.rs`; `StrategyId::Triangular = 7`.
 
-- [ ] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. Add `HawkesIntensity` struct in `crates/strategy/src/features.rs`, feed as feature 11 into `FeatureComputer`.
+- [x] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. `HawkesIntensity` lives in `crates/strategy/src/features.rs`; `FeatureComputer::compute_extended()` exposes it as feature 11 while keeping the existing ONNX 10-feature path stable.
 
 - [ ] **Regime detection (HMM)** — 2-state Hidden Markov Model (trending vs mean-reverting). Switch strategy parameters based on detected regime. Add `HmmFilter` in `crates/strategy/src/regime.rs`.
 
-- [ ] **Spoofing / iceberg detection** — spoofing: large quote appears then cancels before fill (track cancel-rate per price level). Iceberg: repeated fills at same price despite thin visible qty. Add to `crates/risk/src/manager.rs` as a signal quality filter.
+- [x] **Spoofing / iceberg detection** — spoofing: large quote appears then cancels before fill (track cancel-rate per price level). Iceberg: repeated fills at same price despite thin visible qty. Added to `crates/risk/src/manager.rs` as a signal quality filter.
 
 - [x] **Volume prediction** — rolling ADV (average daily volume) estimator using exponential decay: `ADV_t = α·V_t + (1−α)·ADV_{t−1}`. `VolumeEstimator` added in `crates/strategy/src/features.rs`; kept separate from `FeatureComputer` to avoid changing ONNX input shape.
 
@@ -61,7 +61,7 @@ This file tracks what comes next.
 
 - [x] **Queue position / fill probability** — estimate P(fill) at each price level from queue depth and historical fill rate. `FillProbabilityModel` in `crates/execution/src/queue_model.rs` converts eligible low-probability limit orders to IOC market orders when P(fill) < 0.4.
 
-- [ ] **Spread decomposition** — decompose observed spread into: adverse-selection component, inventory component, order-processing cost. Measured via Roll model or Glosten-Harris. Expose as TUI metric. Add to `crates/metrics/`.
+- [x] **Spread decomposition** — decompose observed spread into: adverse-selection component, inventory component, order-processing cost. `SpreadDecomposer` in `crates/metrics/` uses a Roll-style component plus imbalance pressure and exposes the components in the TUI stats panel.
 
 ---
 
@@ -105,9 +105,9 @@ This file tracks what comes next.
 12. ~~Correlation-aware position limits~~ ✅
 13. ~~IOC/FOK + Post-only TIF~~ ✅
 14. ~~Queue position / fill probability~~ ✅
-15. Spoofing / iceberg detection
-16. Spread decomposition (TUI metric)
-17. Hawkes process
+15. ~~Spoofing / iceberg detection~~ ✅
+16. ~~Spread decomposition (TUI metric)~~ ✅
+17. ~~Hawkes process~~ ✅
 18. Regime detection (HMM)
 19. Liquidity probing
 20. Online learning (ML fallback)
@@ -140,9 +140,9 @@ This file tracks what comes next.
 | Correlation Position Limits | ✅ correlation-weighted portfolio delta |
 | IOC / FOK / Post-only | ✅ TIF carried through signals and gateways |
 | Queue / Fill Probability | ✅ queue-depth model routes low-P(fill) limits to market |
-| Iceberg / Spoofing Detection | 📋 #15 |
-| Spread Decomposition | 📋 #16 |
-| Hawkes Process (Order Flow) | 📋 #17 |
+| Iceberg / Spoofing Detection | ✅ risk signal-quality filter |
+| Spread Decomposition | ✅ TUI metric via SpreadDecomposer |
+| Hawkes Process (Order Flow) | ✅ HawkesIntensity extended feature |
 | Regime Detection (HMM) | 📋 #18 |
 | Liquidity Detection / Probing | 📋 #19 |
 | Online Learning (SGD) | 📋 #20 |

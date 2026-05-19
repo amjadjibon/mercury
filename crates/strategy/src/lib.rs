@@ -15,7 +15,9 @@ pub mod triangular;
 pub mod volatility;
 
 pub use arbitrage::ArbitrageStrategy;
-pub use features::{FEATURE_COUNT, FeatureComputer, VolumeEstimator};
+pub use features::{
+    EXTENDED_FEATURE_COUNT, FEATURE_COUNT, FeatureComputer, HawkesIntensity, VolumeEstimator,
+};
 pub use indicators::{Atr, Ema, Macd, Rsi, Sma, Window};
 pub use inference_strategy::InferenceStrategy;
 pub use market_maker::MarketMaker;

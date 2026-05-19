@@ -8,7 +8,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use mercury_core::{Exchange, OrderBook, Side, Symbol};
-use mercury_metrics::PnLTracker;
+use mercury_metrics::{PnLTracker, SpreadComponents, SpreadDecomposer};
 use ratatui::{
     Frame, Terminal,
     backend::CrosstermBackend,
@@ -71,6 +71,8 @@ struct SymbolTab {
     price_history: Vec<(f64, f64)>,
     pnl_history: Vec<(f64, f64)>,
     fills: Vec<FillEntry>,
+    spread_decomposer: SpreadDecomposer,
+    spread_components: Option<SpreadComponents>,
     start_time: std::time::Instant,
     latency_p50: u64,
     latency_p99: u64,
@@ -89,6 +91,8 @@ impl SymbolTab {
             price_history: Vec::with_capacity(200),
             pnl_history: Vec::with_capacity(200),
             fills: Vec::new(),
+            spread_decomposer: SpreadDecomposer::default(),
+            spread_components: None,
             start_time: std::time::Instant::now(),
             latency_p50: 0,
             latency_p99: 0,
@@ -250,6 +254,7 @@ fn run_app(
                     for tab in app.tabs.iter_mut() {
                         if tab.symbol == update.symbol {
                             tab.book.apply_update(&update);
+                            tab.spread_components = tab.spread_decomposer.update(&tab.book);
                             if let Some(mid) = tab.book.mid_price() {
                                 tab.on_price(mid.to_f64());
                                 tab.unrealized_pnl = tab.pnl_tracker.unrealized_pnl(tab.symbol, mid.to_decimal());
@@ -308,6 +313,16 @@ fn pnl_color(v: Decimal) -> Color {
         Color::Red
     } else {
         Color::Gray
+    }
+}
+
+fn spread_decomposition_str(tab: &SymbolTab) -> String {
+    match tab.spread_components {
+        Some(c) => format!(
+            "total {:.2}bps  adverse {:.2}  inv {:.2}  ops {:.2}",
+            c.total_bps, c.adverse_selection_bps, c.inventory_bps, c.order_processing_bps
+        ),
+        None => "–".to_string(),
     }
 }
 
@@ -505,6 +520,10 @@ fn ui(f: &mut Frame, app: &App) {
                 format!("{}/{}μs", tab.latency_p50 / 1000, tab.latency_p99 / 1000),
                 Style::default().fg(Color::Cyan),
             ),
+        ]),
+        Line::from(vec![
+            Span::raw("Spread   : "),
+            Span::styled(spread_decomposition_str(tab), Style::default().fg(Color::Cyan)),
         ]),
     ])
     .block(Block::default().borders(Borders::ALL).title("P&L"));

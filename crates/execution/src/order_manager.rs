@@ -1,6 +1,6 @@
 //! Order lifecycle management.
 
-use crate::queue_model::{crossed_order, FillProbabilityConfig, FillProbabilityModel};
+use crate::queue_model::{FillProbabilityConfig, FillProbabilityModel, crossed_order};
 use mercury_core::{
     BookUpdate, Event, EventBus, EventPayload, Fill, Order, OrderId, OrderStatus, Signal,
     TimeInForce, Timestamp, now_nanos,
@@ -66,6 +66,7 @@ impl OrderManager {
 
     /// Update the book snapshot used by fill-probability routing.
     pub fn on_book_update(&self, update: &BookUpdate) {
+        self.risk_manager.on_book_update(update);
         self.fill_probability.write().apply_book_update(update);
     }
 
@@ -266,12 +267,24 @@ mod tests {
                 Exchange::Binance,
                 Symbol::new("BTCUSDT"),
                 &[
-                    Level::new(dec!(50000) - rust_decimal::Decimal::from(seq % 5), dec!(1.0)),
-                    Level::new(dec!(49999) - rust_decimal::Decimal::from(seq % 5), dec!(2.0)),
+                    Level::new(
+                        dec!(50000) - rust_decimal::Decimal::from(seq % 5),
+                        dec!(1.0),
+                    ),
+                    Level::new(
+                        dec!(49999) - rust_decimal::Decimal::from(seq % 5),
+                        dec!(2.0),
+                    ),
                 ],
                 &[
-                    Level::new(dec!(50001) + rust_decimal::Decimal::from(seq % 5), dec!(1.0)),
-                    Level::new(dec!(50002) + rust_decimal::Decimal::from(seq % 5), dec!(0.5)),
+                    Level::new(
+                        dec!(50001) + rust_decimal::Decimal::from(seq % 5),
+                        dec!(1.0),
+                    ),
+                    Level::new(
+                        dec!(50002) + rust_decimal::Decimal::from(seq % 5),
+                        dec!(0.5),
+                    ),
                 ],
                 seq,
                 seq == 0,
@@ -302,8 +315,14 @@ mod tests {
             let upd = BookUpdate::from_slices(
                 Exchange::Binance,
                 Symbol::new("BTCUSDT"),
-                &[Level::new(bid_p, dec!(2.0)), Level::new(bid_p - dec!(1), dec!(3.0))],
-                &[Level::new(ask_p, dec!(2.0)), Level::new(ask_p + dec!(1), dec!(1.5))],
+                &[
+                    Level::new(bid_p, dec!(2.0)),
+                    Level::new(bid_p - dec!(1), dec!(3.0)),
+                ],
+                &[
+                    Level::new(ask_p, dec!(2.0)),
+                    Level::new(ask_p + dec!(1), dec!(1.5)),
+                ],
                 seq,
                 seq == 0,
             );
@@ -331,7 +350,10 @@ mod tests {
             }
         }
 
-        assert!(fills_collected > 0, "Expected at least one fill in e2e pipeline");
+        assert!(
+            fills_collected > 0,
+            "Expected at least one fill in e2e pipeline"
+        );
         let result = exchange.result();
         assert!(result.total_trades > 0);
         assert!(result.total_volume > dec!(0));

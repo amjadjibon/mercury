@@ -5,7 +5,7 @@ use crate::checks::{
     check_position_limit, check_rate_limit, kelly_fraction,
 };
 use crate::kill_switch::KillSwitch;
-use mercury_core::{Fill, Price, Quantity, Side, Signal, Symbol};
+use mercury_core::{BookUpdate, Fill, FixedPoint, Price, Quantity, Side, Signal, Symbol};
 use parking_lot::RwLock;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -42,6 +42,11 @@ pub enum RiskViolation {
         delta: Quantity,
         limit: Quantity,
     },
+    #[error("Signal quality filter active: {symbol} reason={reason}")]
+    SignalQuality {
+        symbol: Symbol,
+        reason: &'static str,
+    },
 }
 
 /// Risk manager configuration.
@@ -73,6 +78,18 @@ pub struct RiskConfig {
     pub max_portfolio_delta: Quantity,
     /// Pairwise symbol correlations used for joint exposure checks.
     pub correlation_matrix: HashMap<(Symbol, Symbol), Decimal>,
+    /// Visible quantity that is large enough to monitor for spoof-like cancels.
+    pub spoof_large_quote_qty: Quantity,
+    /// Fraction of a large quote that must disappear to count as a spoof-like cancel.
+    pub spoof_cancel_ratio: Decimal,
+    /// Repeated large quote cancels at one price before blocking new signals.
+    pub max_spoof_cancels_per_level: u32,
+    /// Visible quantity below which repeated fills at one price look iceberg-like.
+    pub iceberg_visible_qty: Quantity,
+    /// Repeated thin-visible fills at one price before blocking new signals.
+    pub iceberg_repeated_fills: u32,
+    /// Number of book updates to block after spoofing or iceberg detection.
+    pub signal_quality_block_updates: u32,
 }
 
 impl Default for RiskConfig {
@@ -90,8 +107,33 @@ impl Default for RiskConfig {
             default_volatility: Decimal::ZERO,
             max_portfolio_delta: Decimal::ZERO,
             correlation_matrix: HashMap::new(),
+            spoof_large_quote_qty: Decimal::from(100),
+            spoof_cancel_ratio: Decimal::from_str_exact("0.8").unwrap(),
+            max_spoof_cancels_per_level: 3,
+            iceberg_visible_qty: Decimal::from(1),
+            iceberg_repeated_fills: 3,
+            signal_quality_block_updates: 20,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct LevelQuality {
+    last_qty: Quantity,
+    large_seen_qty: Quantity,
+    spoof_cancels: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct FillQuality {
+    count: u32,
+}
+
+#[derive(Debug, Default)]
+struct SignalQualityState {
+    levels: HashMap<(Symbol, Side, FixedPoint), LevelQuality>,
+    thin_fills: HashMap<(Symbol, FixedPoint), FillQuality>,
+    blocked_updates: HashMap<Symbol, (u32, &'static str)>,
 }
 
 /// Market state inputs used by the price-impact pre-trade check.
@@ -133,6 +175,8 @@ pub struct RiskManager {
     trade_outcomes: RwLock<Vec<TradeOutcome>>,
     /// Per-symbol ADV and volatility estimates for market-impact checks.
     market_impact_inputs: RwLock<HashMap<Symbol, MarketImpactInput>>,
+    /// Spoofing and iceberg signal-quality state.
+    signal_quality: RwLock<SignalQualityState>,
 }
 
 impl RiskManager {
@@ -148,6 +192,7 @@ impl RiskManager {
             fill_snapshots: RwLock::new(Vec::new()),
             trade_outcomes: RwLock::new(Vec::new()),
             market_impact_inputs: RwLock::new(HashMap::new()),
+            signal_quality: RwLock::new(SignalQualityState::default()),
         }
     }
 
@@ -157,6 +202,7 @@ impl RiskManager {
         if self.kill_switch.is_active() {
             return Err(RiskViolation::KillSwitchActive);
         }
+        self.check_signal_quality(signal)?;
 
         // Check position limit
         let positions = self.positions.read();
@@ -209,6 +255,46 @@ impl RiskManager {
             position = %position,
             "Position updated"
         );
+        drop(positions);
+        self.update_iceberg_state(fill);
+    }
+
+    /// Update spoofing signal-quality state from an order book delta or snapshot.
+    pub fn on_book_update(&self, update: &BookUpdate) {
+        if self.config.max_spoof_cancels_per_level == 0 && self.config.iceberg_repeated_fills == 0 {
+            return;
+        }
+
+        let mut quality = self.signal_quality.write();
+        let mut unblock = false;
+        if let Some((remaining, _reason)) = quality.blocked_updates.get_mut(&update.symbol) {
+            *remaining = remaining.saturating_sub(1);
+            if *remaining == 0 {
+                unblock = true;
+            }
+        }
+        if unblock {
+            quality.blocked_updates.remove(&update.symbol);
+        }
+
+        for level in update.bid_levels() {
+            self.update_level_quality(
+                &mut quality,
+                update.symbol,
+                Side::Buy,
+                level.price,
+                level.quantity.to_decimal(),
+            );
+        }
+        for level in update.ask_levels() {
+            self.update_level_quality(
+                &mut quality,
+                update.symbol,
+                Side::Sell,
+                level.price,
+                level.quantity.to_decimal(),
+            );
+        }
     }
 
     /// Update daily PnL and check trailing drawdown.
@@ -396,6 +482,99 @@ impl RiskManager {
         Ok(())
     }
 
+    fn check_signal_quality(&self, signal: &Signal) -> Result<(), RiskViolation> {
+        let quality = self.signal_quality.read();
+        if let Some((remaining, reason)) = quality.blocked_updates.get(&signal.symbol) {
+            if *remaining > 0 {
+                return Err(RiskViolation::SignalQuality {
+                    symbol: signal.symbol,
+                    reason,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn update_level_quality(
+        &self,
+        quality: &mut SignalQualityState,
+        symbol: Symbol,
+        side: Side,
+        price: FixedPoint,
+        qty: Quantity,
+    ) {
+        if self.config.max_spoof_cancels_per_level == 0 {
+            return;
+        }
+
+        let mut should_block = false;
+        let state = quality.levels.entry((symbol, side, price)).or_default();
+        if qty >= self.config.spoof_large_quote_qty {
+            state.large_seen_qty = qty;
+        } else if state.large_seen_qty >= self.config.spoof_large_quote_qty {
+            let vanished = state.large_seen_qty - qty;
+            let vanish_ratio = if state.large_seen_qty > Decimal::ZERO {
+                vanished / state.large_seen_qty
+            } else {
+                Decimal::ZERO
+            };
+            if vanish_ratio >= self.config.spoof_cancel_ratio {
+                state.spoof_cancels += 1;
+                if state.spoof_cancels >= self.config.max_spoof_cancels_per_level {
+                    should_block = true;
+                    state.spoof_cancels = 0;
+                }
+            }
+            state.large_seen_qty = Decimal::ZERO;
+        }
+        state.last_qty = qty;
+        if should_block {
+            quality.blocked_updates.insert(
+                symbol,
+                (self.config.signal_quality_block_updates, "spoofing"),
+            );
+        }
+    }
+
+    fn update_iceberg_state(&self, fill: &Fill) {
+        if self.config.iceberg_repeated_fills == 0 {
+            return;
+        }
+
+        let fill_price = FixedPoint::from_decimal(fill.price);
+        let visible_qty = self.visible_qty_at(fill.symbol, fill.side.opposite(), fill_price);
+        if visible_qty > self.config.iceberg_visible_qty {
+            return;
+        }
+
+        let mut quality = self.signal_quality.write();
+        let mut should_block = false;
+        let state = quality
+            .thin_fills
+            .entry((fill.symbol, fill_price))
+            .or_default();
+        state.count += 1;
+        if state.count >= self.config.iceberg_repeated_fills {
+            should_block = true;
+            state.count = 0;
+        }
+        if should_block {
+            quality.blocked_updates.insert(
+                fill.symbol,
+                (self.config.signal_quality_block_updates, "iceberg"),
+            );
+        }
+    }
+
+    fn visible_qty_at(&self, symbol: Symbol, side: Side, price: FixedPoint) -> Quantity {
+        self.signal_quality
+            .read()
+            .levels
+            .get(&(symbol, side, price))
+            .map(|level| level.last_qty)
+            .unwrap_or(Decimal::ZERO)
+    }
+
     /// Current intraday drawdown (session_high - current_pnl). Zero or positive.
     pub fn intraday_drawdown(&self) -> Price {
         let pnl = *self.daily_pnl.read();
@@ -511,8 +690,32 @@ impl RiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mercury_core::OrderType;
+    use mercury_core::{BookUpdate, Exchange, Level, OrderType, TimeInForce};
     use rust_decimal_macros::dec;
+
+    fn test_signal(symbol: Symbol) -> Signal {
+        Signal {
+            symbol,
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            price: None,
+            quantity: dec!(0.1).into(),
+            strategy: mercury_core::StrategyId::Unknown,
+            cancel_replace: false,
+            time_in_force: TimeInForce::IOC,
+        }
+    }
+
+    fn book_update(symbol: Symbol, bids: &[Level], asks: &[Level], sequence: u64) -> BookUpdate {
+        BookUpdate::from_slices(
+            Exchange::Binance,
+            symbol,
+            bids,
+            asks,
+            sequence,
+            sequence == 1,
+        )
+    }
 
     #[test]
     fn test_position_limit() {
@@ -536,7 +739,7 @@ mod tests {
             quantity: dec!(0.2).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -617,7 +820,7 @@ mod tests {
             quantity: dec!(0.1).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -642,7 +845,7 @@ mod tests {
             quantity: dec!(100).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -666,7 +869,7 @@ mod tests {
             quantity: dec!(1).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(manager.check(&signal).is_ok());
@@ -717,7 +920,7 @@ mod tests {
             quantity: dec!(0.7).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         let result = manager.check(&signal);
@@ -748,9 +951,101 @@ mod tests {
             quantity: dec!(0.7).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
-                time_in_force: mercury_core::TimeInForce::IOC,
+            time_in_force: mercury_core::TimeInForce::IOC,
         };
 
         assert!(manager.check(&signal).is_ok());
+    }
+
+    #[test]
+    fn test_spoofing_filter_blocks_after_repeated_large_quote_cancels() {
+        let symbol = Symbol::new("BTCUSDT");
+        let manager = RiskManager::new(RiskConfig {
+            spoof_large_quote_qty: dec!(10),
+            spoof_cancel_ratio: dec!(0.8),
+            max_spoof_cancels_per_level: 2,
+            signal_quality_block_updates: 3,
+            ..Default::default()
+        });
+
+        manager.on_book_update(&book_update(
+            symbol,
+            &[Level::new(dec!(50000), dec!(20))],
+            &[],
+            1,
+        ));
+        manager.on_book_update(&book_update(
+            symbol,
+            &[Level::new(dec!(50000), dec!(0))],
+            &[],
+            2,
+        ));
+        manager.on_book_update(&book_update(
+            symbol,
+            &[Level::new(dec!(50000), dec!(20))],
+            &[],
+            3,
+        ));
+        manager.on_book_update(&book_update(
+            symbol,
+            &[Level::new(dec!(50000), dec!(0))],
+            &[],
+            4,
+        ));
+
+        let result = manager.check(&test_signal(symbol));
+        assert!(matches!(
+            result,
+            Err(RiskViolation::SignalQuality {
+                reason: "spoofing",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn test_iceberg_filter_blocks_after_repeated_thin_visible_fills() {
+        let symbol = Symbol::new("BTCUSDT");
+        let manager = RiskManager::new(RiskConfig {
+            iceberg_visible_qty: dec!(1),
+            iceberg_repeated_fills: 2,
+            signal_quality_block_updates: 3,
+            ..Default::default()
+        });
+
+        manager.on_book_update(&book_update(
+            symbol,
+            &[],
+            &[Level::new(dec!(50001), dec!(0.25))],
+            1,
+        ));
+
+        let fill = Fill {
+            order_id: 1,
+            exchange: Exchange::Binance,
+            symbol,
+            side: Side::Buy,
+            price: dec!(50001),
+            quantity: dec!(0.1),
+            fee: dec!(0),
+            fee_asset: "USDT".into(),
+            is_maker: false,
+            trade_id: 1,
+            timestamp: 0,
+        };
+        manager.on_fill(&fill);
+        manager.on_fill(&Fill {
+            trade_id: 2,
+            ..fill
+        });
+
+        let result = manager.check(&test_signal(symbol));
+        assert!(matches!(
+            result,
+            Err(RiskViolation::SignalQuality {
+                reason: "iceberg",
+                ..
+            })
+        ));
     }
 }

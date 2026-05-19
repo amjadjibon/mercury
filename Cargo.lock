@@ -2624,6 +2624,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "parking_lot",
  "rust_decimal",
+ "rust_decimal_macros",
  "tracing",
 ]
 
