@@ -37,7 +37,7 @@ This file tracks what comes next.
 
 - [x] **IOC / FOK time-in-force** — Immediate-Or-Cancel and Fill-Or-Kill needed for taker momentum strategies. TIF now flows from `Signal` to `Order`; Binance, OKX, Bybit, Coinbase, and Kraken map it in order payloads.
 
-- [ ] **Liquidity detection (probing)** — send a small resting limit order 1 tick inside the spread; if filled quickly, infer a hidden iceberg and scale in. Track probe fills separately in `OrderManager`. Add `LiquidityProber` in `crates/execution/src/probe.rs`.
+- [x] **Liquidity detection (probing)** — send a small resting limit order 1 tick inside the spread; if filled quickly, infer hidden liquidity and scale in. `LiquidityProber` in `crates/execution/src/probe.rs` tracks active probes, records quick probe fills separately, and `OrderManager` publishes scale-in signals.
 
 ---
 
@@ -109,7 +109,7 @@ This file tracks what comes next.
 16. ~~Spread decomposition (TUI metric)~~ ✅
 17. ~~Hawkes process~~ ✅
 18. ~~Regime detection (HMM)~~ ✅
-19. Liquidity probing
+19. ~~Liquidity probing~~ ✅
 20. Online learning (ML fallback)
 21. Sentiment / news signal
 22. Full LOB CNN input
@@ -144,7 +144,7 @@ This file tracks what comes next.
 | Spread Decomposition | ✅ TUI metric via SpreadDecomposer |
 | Hawkes Process (Order Flow) | ✅ HawkesIntensity extended feature |
 | Regime Detection (HMM) | ✅ HmmFilter online forward filter |
-| Liquidity Detection / Probing | 📋 #19 |
+| Liquidity Detection / Probing | ✅ LiquidityProber quick-fill scale-in |
 | Online Learning (SGD) | 📋 #20 |
 | Sentiment / News Signal | 📋 #21 |
 | Full LOB CNN | 📋 #22 |

@@ -1,5 +1,6 @@
 //! Order lifecycle management.
 
+use crate::probe::{LiquidityProbeConfig, LiquidityProber, ProbeFill};
 use crate::queue_model::{FillProbabilityConfig, FillProbabilityModel, crossed_order};
 use mercury_core::{
     BookUpdate, Event, EventBus, EventPayload, Fill, Order, OrderId, OrderStatus, Signal,
@@ -43,6 +44,7 @@ pub struct OrderManager {
     gateway: Arc<dyn ExchangeGateway>,
     event_bus: Arc<EventBus>,
     fill_probability: RwLock<FillProbabilityModel>,
+    liquidity_prober: RwLock<LiquidityProber>,
 }
 
 impl OrderManager {
@@ -61,6 +63,7 @@ impl OrderManager {
             fill_probability: RwLock::new(FillProbabilityModel::new(
                 FillProbabilityConfig::default(),
             )),
+            liquidity_prober: RwLock::new(LiquidityProber::new(LiquidityProbeConfig::default())),
         }
     }
 
@@ -68,6 +71,24 @@ impl OrderManager {
     pub fn on_book_update(&self, update: &BookUpdate) {
         self.risk_manager.on_book_update(update);
         self.fill_probability.write().apply_book_update(update);
+        self.liquidity_prober.write().apply_book_update(update);
+    }
+
+    /// Submit a small post-only probe one tick inside the spread.
+    pub async fn submit_probe(
+        &self,
+        symbol: mercury_core::Symbol,
+        side: mercury_core::Side,
+    ) -> Result<Option<OrderId>, ExecutionError> {
+        let Some(signal) = self.liquidity_prober.read().probe_signal(symbol, side) else {
+            return Ok(None);
+        };
+
+        let order_id = self.submit(signal).await?;
+        if let Some(order) = self.get_order(order_id).map(|live| live.order) {
+            self.liquidity_prober.write().register_order(&order);
+        }
+        Ok(Some(order_id))
     }
 
     /// Submit a signal as an order.
@@ -182,6 +203,10 @@ impl OrderManager {
         // Update risk manager
         self.risk_manager.on_fill(fill);
         self.fill_probability.write().record_fill(fill);
+        if let Some(scale_in) = self.liquidity_prober.write().on_fill(fill) {
+            let event = Event::new(self.event_bus.next_id(), EventPayload::Signal(scale_in));
+            let _ = self.event_bus.try_publish(event);
+        }
 
         // Update order state
         let mut orders = self.open_orders.write();
@@ -232,6 +257,16 @@ impl OrderManager {
         self.open_orders.read().get(&order_id).cloned()
     }
 
+    /// Probe fills that completed within the quick-fill threshold.
+    pub fn probe_fills(&self) -> Vec<ProbeFill> {
+        self.liquidity_prober.read().probe_fills()
+    }
+
+    /// Whether an order ID belongs to an active liquidity probe.
+    pub fn is_probe_order(&self, order_id: OrderId) -> bool {
+        self.liquidity_prober.read().is_probe_order(order_id)
+    }
+
     /// Restore open orders recovered from the exchange after a restart.
     /// Does not re-submit them — they are already live on the exchange.
     pub fn restore_open_orders(&self, orders: Vec<Order>) {
@@ -255,41 +290,109 @@ impl OrderManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mercury_core::{BookUpdate, Event, EventPayload, Exchange, Level, Symbol};
+    use async_trait::async_trait;
+    use mercury_core::{BookUpdate, Event, EventPayload, Exchange, Level, OrderType, Side, Symbol};
+    use mercury_gateway::{ExchangeGateway, GatewayResult};
     use mercury_risk::{RiskConfig, RiskManager};
     use mercury_strategy::{MarketMaker, StrategyRunner};
     use rust_decimal_macros::dec;
+    use tokio::sync::mpsc;
 
-    fn book_event(_bus: &EventBus, seq: u64) -> Event {
-        Event::new(
-            seq,
-            EventPayload::BookUpdate(BookUpdate::from_slices(
-                Exchange::Binance,
-                Symbol::new("BTCUSDT"),
-                &[
-                    Level::new(
-                        dec!(50000) - rust_decimal::Decimal::from(seq % 5),
-                        dec!(1.0),
-                    ),
-                    Level::new(
-                        dec!(49999) - rust_decimal::Decimal::from(seq % 5),
-                        dec!(2.0),
-                    ),
-                ],
-                &[
-                    Level::new(
-                        dec!(50001) + rust_decimal::Decimal::from(seq % 5),
-                        dec!(1.0),
-                    ),
-                    Level::new(
-                        dec!(50002) + rust_decimal::Decimal::from(seq % 5),
-                        dec!(0.5),
-                    ),
-                ],
-                seq,
-                seq == 0,
-            )),
-        )
+    #[derive(Debug, Default)]
+    struct MockGateway {
+        submitted: RwLock<Vec<Order>>,
+    }
+
+    #[async_trait]
+    impl ExchangeGateway for MockGateway {
+        fn exchange(&self) -> Exchange {
+            Exchange::Binance
+        }
+
+        async fn submit_order(&self, order: &Order) -> GatewayResult<OrderId> {
+            self.submitted.write().push(order.clone());
+            Ok(order.id)
+        }
+
+        async fn cancel_order(&self, _symbol: Symbol, _order_id: OrderId) -> GatewayResult<()> {
+            Ok(())
+        }
+
+        async fn cancel_all(&self, _symbol: Symbol) -> GatewayResult<u32> {
+            Ok(0)
+        }
+
+        fn fills(&self) -> mpsc::Receiver<Fill> {
+            mpsc::channel(1).1
+        }
+
+        async fn connect(&self) -> GatewayResult<()> {
+            Ok(())
+        }
+
+        async fn disconnect(&self) -> GatewayResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_fill_is_tracked_and_publishes_scale_in_signal() {
+        let event_bus = Arc::new(EventBus::new(128));
+        let risk = Arc::new(RiskManager::new(RiskConfig::default()));
+        let gateway = Arc::new(MockGateway::default());
+        let manager = OrderManager::new(risk, gateway, Arc::clone(&event_bus));
+        let mut rx = event_bus.subscribe();
+        let symbol = Symbol::new("BTCUSDT");
+
+        manager.on_book_update(&BookUpdate::from_slices(
+            Exchange::Binance,
+            symbol,
+            &[Level::new(dec!(50000), dec!(1.0))],
+            &[Level::new(dec!(50001), dec!(1.0))],
+            1,
+            true,
+        ));
+
+        let order_id = manager
+            .submit_probe(symbol, Side::Buy)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(manager.is_probe_order(order_id));
+
+        let order = manager.get_order(order_id).unwrap().order;
+        manager.on_fill(&Fill {
+            order_id,
+            exchange: Exchange::Binance,
+            symbol,
+            side: Side::Buy,
+            price: order.price.unwrap().to_decimal(),
+            quantity: order.quantity.to_decimal(),
+            fee: dec!(0),
+            fee_asset: "USDT".to_string(),
+            is_maker: true,
+            trade_id: 1,
+            timestamp: order.created_at + 1_000,
+        });
+
+        assert_eq!(manager.probe_fills().len(), 1);
+        assert!(!manager.is_probe_order(order_id));
+
+        let event = rx.try_recv().unwrap();
+        match event.payload {
+            EventPayload::Order(_) => {}
+            other => panic!("expected submitted order event, got {other:?}"),
+        }
+        let event = rx.try_recv().unwrap();
+        match event.payload {
+            EventPayload::Signal(signal) => {
+                assert_eq!(signal.symbol, symbol);
+                assert_eq!(signal.side, Side::Buy);
+                assert_eq!(signal.order_type, OrderType::Market);
+                assert!(signal.quantity > order.quantity);
+            }
+            other => panic!("expected scale-in signal, got {other:?}"),
+        }
     }
 
     /// End-to-end: BookUpdate events → MarketMaker signals → SimulatedExchange → fills.
