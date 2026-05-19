@@ -49,7 +49,7 @@ This file tracks what comes next.
 
 - [ ] **Correlation-aware joint position limit** — BTC and ETH are ~0.9 correlated; a long BTC + long ETH doubles directional exposure. Add a `portfolio_delta()` method in `RiskManager` that sums positions weighted by correlation matrix. File: `crates/risk/src/manager.rs`.
 
-- [ ] **Inventory skew wired to quote pricing** — `RiskManager::skew(symbol)` already exists but `MarketMaker` ignores it. Wire it: when long-heavy, shift both bid and ask down by `skew * σ` to lean toward selling. File: `crates/strategy/src/market_maker.rs`.
+- [x] **Inventory skew wired to quote pricing** — `MarketMaker` can use an external skew provider, and the CLI wires it to `RiskManager::skew(symbol)`. Long-heavy skew shifts both bid and ask down by `skew * σ` to lean toward selling. File: `crates/strategy/src/market_maker.rs`.
 
 ---
 
@@ -101,7 +101,7 @@ This file tracks what comes next.
 8. ~~Order book imbalance~~ ✅
 9. ~~Triangular arbitrage~~ ✅
 10. ~~Volume prediction + Almgren-Chriss impact (dependency chain)~~ ✅
-11. Inventory skew wired to MarketMaker
+11. ~~Inventory skew wired to MarketMaker~~ ✅
 12. Correlation-aware position limits
 13. IOC/FOK + Post-only TIF
 14. Queue position / fill probability
@@ -136,7 +136,7 @@ This file tracks what comes next.
 | Triangular Arbitrage | ✅ TriangularStrategy |
 | Volume Prediction | ✅ VolumeEstimator |
 | Price Impact (Almgren-Chriss) | ✅ pre-trade risk check |
-| Inventory Skew | 📋 #11 |
+| Inventory Skew | ✅ RiskManager skew wired to MarketMaker |
 | Correlation Position Limits | 📋 #12 |
 | IOC / FOK / Post-only | 📋 #13 |
 | Queue / Fill Probability | 📋 #14 |

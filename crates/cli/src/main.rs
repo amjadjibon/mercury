@@ -444,7 +444,9 @@ async fn run_trading(
 
     match strategy_name.as_str() {
         "market_maker" => {
-            let mm = MarketMaker::new(10, dec!(0.01), dec!(1.0));
+            let rm = Arc::clone(&risk_manager);
+            let mm = MarketMaker::new(10, dec!(0.01), dec!(1.0))
+                .with_inventory_skew_provider(Arc::new(move |symbol| rm.skew(symbol)));
             strategy_runner.add_strategy(Box::new(mm));
         }
         "momentum" => {

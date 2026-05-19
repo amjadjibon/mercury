@@ -11,9 +11,14 @@
 
 use crate::traits::Strategy;
 use crate::volatility::VolatilityEstimator;
-use mercury_core::{Fill, FixedPoint, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Trade};
+use mercury_core::{
+    Fill, FixedPoint, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Symbol, Trade,
+};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
+use std::sync::Arc;
+
+type InventorySkewProvider = Arc<dyn Fn(Symbol) -> Decimal + Send + Sync>;
 
 /// Avellaneda-Stoikov market maker with inventory-adjusted reservation price.
 pub struct MarketMaker {
@@ -41,6 +46,8 @@ pub struct MarketMaker {
     quote_interval: u32,
     /// Parkinson volatility estimator — overrides EMA variance when warmed up.
     vol_estimator: VolatilityEstimator,
+    /// Optional authoritative inventory skew source, usually `RiskManager::skew`.
+    inventory_skew_provider: Option<InventorySkewProvider>,
 }
 
 impl MarketMaker {
@@ -64,6 +71,7 @@ impl MarketMaker {
             quote_interval: 5,
             // 50 ticks/bar × 20 bars — warm up after ~1000 ticks (~1–2 min at typical feed rate).
             vol_estimator: VolatilityEstimator::new(50, 20),
+            inventory_skew_provider: None,
         }
     }
 
@@ -82,6 +90,12 @@ impl MarketMaker {
     /// Override quote interval (default 5 ticks).
     pub fn with_quote_interval(mut self, interval: u32) -> Self {
         self.quote_interval = interval;
+        self
+    }
+
+    /// Use an external inventory skew source. Positive skew means long-heavy.
+    pub fn with_inventory_skew_provider(mut self, provider: InventorySkewProvider) -> Self {
+        self.inventory_skew_provider = Some(provider);
         self
     }
 
@@ -111,8 +125,8 @@ impl MarketMaker {
             if prev > Decimal::ZERO {
                 let ret = (mid - prev) / prev;
                 let sq = ret * ret;
-                self.variance_ema =
-                    self.variance_alpha * sq + (Decimal::ONE - self.variance_alpha) * self.variance_ema;
+                self.variance_ema = self.variance_alpha * sq
+                    + (Decimal::ONE - self.variance_alpha) * self.variance_ema;
             }
         }
         self.prev_mid = Some(mid);
@@ -122,12 +136,39 @@ impl MarketMaker {
     ///
     /// Inventory q is normalised by max_inventory so the penalty is bounded.
     fn reservation_price(&self, mid: Decimal) -> Decimal {
-        let q = if self.max_inventory > Decimal::ZERO {
+        let q = if self.inventory_skew_provider.is_some() {
+            Decimal::ZERO
+        } else {
+            self.inventory_skew(Symbol::new(""))
+        };
+        mid - q * self.risk_aversion * self.variance_ema * mid
+    }
+
+    fn inventory_skew(&self, symbol: Symbol) -> Decimal {
+        let raw = if let Some(provider) = &self.inventory_skew_provider {
+            provider(symbol)
+        } else if self.max_inventory > Decimal::ZERO {
             self.inventory / self.max_inventory
         } else {
             Decimal::ZERO
         };
-        mid - q * self.risk_aversion * self.variance_ema * mid
+
+        raw.clamp(-Decimal::ONE, Decimal::ONE)
+    }
+
+    fn volatility(&self) -> Decimal {
+        let variance = self.variance_ema.max(Decimal::ZERO);
+        let variance_f64 = variance.to_string().parse::<f64>().unwrap_or(0.0);
+        Decimal::from_str_exact(&format!("{:.10}", variance_f64.sqrt())).unwrap_or(Decimal::ZERO)
+    }
+
+    fn risk_inventory_shift(&self, symbol: Symbol, mid: Decimal) -> Decimal {
+        let skew = self.inventory_skew(symbol);
+        if skew.is_zero() {
+            return Decimal::ZERO;
+        }
+
+        skew * self.volatility() * mid
     }
 
     /// Compute optimal half-spread: δ = (γ·σ²)/2 + (1/γ)·ln(1 + γ/κ)
@@ -188,7 +229,7 @@ impl Strategy for MarketMaker {
             return vec![];
         }
 
-        let r = self.reservation_price(mid);
+        let r = self.reservation_price(mid) - self.risk_inventory_shift(book.symbol, mid);
         let delta = self.half_spread(mid);
 
         let bid_price = r - delta;
@@ -284,7 +325,10 @@ mod tests {
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].side, Side::Buy);
         assert_eq!(signals[1].side, Side::Sell);
-        assert!(signals[0].price.unwrap() < signals[1].price.unwrap(), "bid < ask");
+        assert!(
+            signals[0].price.unwrap() < signals[1].price.unwrap(),
+            "bid < ask"
+        );
     }
 
     #[test]
@@ -313,6 +357,30 @@ mod tests {
         // Long inventory → reservation price falls → both quotes shift down.
         assert!(skewed_bid < neutral_bid, "long inventory should lower bid");
         assert!(skewed_ask < neutral_ask, "long inventory should lower ask");
+    }
+
+    #[test]
+    fn test_external_inventory_skew_shifts_quotes() {
+        let book = make_book(dec!(50000), dec!(50010));
+
+        let mut neutral = MarketMaker::new(10, dec!(0.1), dec!(1.0)).with_quote_interval(1);
+        neutral.variance_ema = dec!(0.0001);
+        let neutral_quotes = neutral.on_book(&book);
+
+        let mut skewed = MarketMaker::new(10, dec!(0.1), dec!(1.0))
+            .with_quote_interval(1)
+            .with_inventory_skew_provider(Arc::new(|_| dec!(0.5)));
+        skewed.variance_ema = dec!(0.0001);
+        let skewed_quotes = skewed.on_book(&book);
+
+        assert!(
+            skewed_quotes[0].price.unwrap() < neutral_quotes[0].price.unwrap(),
+            "external long skew should lower bid"
+        );
+        assert!(
+            skewed_quotes[1].price.unwrap() < neutral_quotes[1].price.unwrap(),
+            "external long skew should lower ask"
+        );
     }
 
     #[test]
