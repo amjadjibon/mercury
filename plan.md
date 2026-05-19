@@ -9,7 +9,7 @@ This file tracks what comes next.
 
 - [x] **Avellaneda-Stoikov market maker** — inventory-adjusted optimal quotes using closed-form solution. Replace `MarketMaker`'s fixed spread with `δ_bid = γσ²(T-t)/2 + (1/γ)ln(1 + γ/k)`. Needs `σ` (realised vol) and `γ` (risk aversion param). File: `crates/strategy/src/market_maker.rs`.
 
-- [ ] **Pairs statistical arbitrage** — Johansen cointegration test on BTC/ETH spread. Entry when z-score > 2σ, exit at 0. Add `PairsStrategy` in `crates/strategy/src/pairs.rs`. Requires price history buffer (~1000 ticks) and eigen-vector hedge ratio.
+- [x] **Pairs statistical arbitrage** — OLS hedge ratio β = Cov(Y,X)/Var(X) on a rolling window. Entry when |z| > 2σ, exit when |z| < 0.5. `PairsStrategy` in `crates/strategy/src/pairs.rs`; `StrategyId::Pairs = 5` added to core.
 
 - [ ] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. Add `HawkesIntensity` struct in `crates/strategy/src/features.rs`, feed as feature 10 into `FeatureComputer`.
 
@@ -88,5 +88,5 @@ This file tracks what comes next.
 3. ~~Realised volatility estimator~~ ✅
 4. ~~WebSocket fill delivery~~ ✅
 5. ~~TWAP slicer~~ ✅
-6. `i64` fixed-point (biggest remaining latency win)
-7. Pairs stat-arb (new alpha source)
+6. ~~`i64` fixed-point~~ ✅
+7. ~~Pairs stat-arb~~ ✅

@@ -67,7 +67,7 @@ impl DatasetGenerator {
                         Some(m) => m,
                         None => return Ok(()),
                     };
-                    let mid_f64: f64 = mid.to_string().parse().unwrap_or(0.0);
+                    let mid_f64: f64 = mid.to_f64();
                     if let Some(feats) = self.features.compute(book) {
                         self.window.push_back((
                             mid_f64,

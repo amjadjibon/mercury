@@ -10,9 +10,10 @@ pub fn check_position_limit(
     signal: &Signal,
     limit: Quantity,
 ) -> Result<(), RiskViolation> {
+    let qty = signal.quantity.to_decimal();
     let new_position = match signal.side {
-        Side::Buy => current + signal.quantity,
-        Side::Sell => current - signal.quantity,
+        Side::Buy => current + qty,
+        Side::Sell => current - qty,
     };
 
     if new_position.abs() > limit {
@@ -113,8 +114,8 @@ mod tests {
             symbol: Symbol::new("BTCUSDT"),
             side: Side::Buy,
             order_type: OrderType::Limit,
-            price: Some(dec!(50000)),
-            quantity: dec!(0.5),
+            price: Some(dec!(50000).into()),
+            quantity: dec!(0.5).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
         };
@@ -129,8 +130,8 @@ mod tests {
             symbol: Symbol::new("BTCUSDT"),
             side: Side::Sell,
             order_type: OrderType::Limit,
-            price: Some(dec!(50000)),
-            quantity: dec!(0.5),
+            price: Some(dec!(50000).into()),
+            quantity: dec!(0.5).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
         };

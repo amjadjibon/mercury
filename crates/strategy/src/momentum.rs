@@ -1,7 +1,7 @@
 //! Momentum strategy.
 
 use crate::traits::Strategy;
-use mercury_core::{Fill, OrderBook, OrderType, Price, Quantity, Side, Signal, StrategyId, Trade};
+use mercury_core::{Fill, FixedPoint, OrderBook, OrderType, Price, Quantity, Side, Signal, StrategyId, Trade};
 use rust_decimal::Decimal;
 use std::collections::VecDeque;
 
@@ -79,7 +79,7 @@ impl Strategy for Momentum {
                 side: Side::Buy,
                 order_type: OrderType::Market,
                 price: None,
-                quantity: self.order_size,
+                quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: false,
             }];
@@ -89,7 +89,7 @@ impl Strategy for Momentum {
                 side: Side::Sell,
                 order_type: OrderType::Market,
                 price: None,
-                quantity: self.order_size,
+                quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: false,
             }];
@@ -102,7 +102,7 @@ impl Strategy for Momentum {
                 side: Side::Sell,
                 order_type: OrderType::Market,
                 price: None,
-                quantity: self.position,
+                quantity: FixedPoint::from_decimal(self.position),
                 strategy: self.id(),
                 cancel_replace: false,
             }];
@@ -112,7 +112,7 @@ impl Strategy for Momentum {
                 side: Side::Buy,
                 order_type: OrderType::Market,
                 price: None,
-                quantity: self.position.abs(),
+                quantity: FixedPoint::from_decimal(self.position.abs()),
                 strategy: self.id(),
                 cancel_replace: false,
             }];

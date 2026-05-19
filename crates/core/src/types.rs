@@ -77,6 +77,9 @@ impl FixedPoint {
                 s[..dot].parse().ok()?
             };
             let frac_str = &s[dot + 1..];
+            // Cap to 8 digits: more precision is discarded, and longer strings can overflow i64.
+            let frac_len_orig = frac_str.len();
+            let frac_str = if frac_len_orig > 8 { &frac_str[..8] } else { frac_str };
             let frac_len = frac_str.len();
             let frac: i64 = if frac_str.is_empty() {
                 0
@@ -84,7 +87,7 @@ impl FixedPoint {
                 frac_str.parse().ok()?
             };
             let scaled_frac = if frac_len >= 8 {
-                frac / 10i64.pow((frac_len - 8) as u32)
+                frac // already 8 digits, no scaling needed
             } else {
                 frac * 10i64.pow((8 - frac_len) as u32)
             };

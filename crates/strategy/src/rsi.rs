@@ -4,7 +4,7 @@
 
 use crate::indicators::{Rsi, Window};
 use crate::traits::Strategy;
-use mercury_core::{OrderType, Side, Signal, StrategyId, Symbol, Trade};
+use mercury_core::{FixedPoint, OrderType, Side, Signal, StrategyId, Symbol, Trade};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use tracing::info;
@@ -64,7 +64,7 @@ impl Strategy for RsiStrategy {
                     side: Side::Buy,
                     order_type: OrderType::Market,
                     price: None,
-                    quantity: self.quantity,
+                    quantity: FixedPoint::from_decimal(self.quantity),
                     strategy: self.id(),
                     cancel_replace: false,
                 }];
@@ -78,7 +78,7 @@ impl Strategy for RsiStrategy {
                     side: Side::Sell,
                     order_type: OrderType::Market,
                     price: None,
-                    quantity: self.quantity,
+                    quantity: FixedPoint::from_decimal(self.quantity),
                     strategy: self.id(),
                     cancel_replace: false,
                 }];

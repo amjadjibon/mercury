@@ -6,8 +6,8 @@
 use crate::features::{FeatureComputer, FEATURE_COUNT};
 use crate::traits::Strategy;
 use mercury_core::{
-    Event, EventBus, EventPayload, Fill, MLPrediction, OrderBook, OrderType, Quantity, Side,
-    Signal, StrategyId, Symbol, Trade,
+    Event, EventBus, EventPayload, Fill, FixedPoint, MLPrediction, OrderBook, OrderType, Quantity,
+    Side, Signal, StrategyId, Symbol, Trade,
 };
 use std::sync::Arc;
 use tract_onnx::prelude::*;
@@ -147,7 +147,7 @@ impl Strategy for InferenceStrategy {
                 side: Side::Buy,
                 order_type: OrderType::Limit,
                 price: Some(mid),
-                quantity: self.quantity,
+                quantity: FixedPoint::from_decimal(self.quantity),
                 strategy: StrategyId::Inference,
                 cancel_replace: true,
             }],
@@ -156,7 +156,7 @@ impl Strategy for InferenceStrategy {
                 side: Side::Sell,
                 order_type: OrderType::Limit,
                 price: Some(mid),
-                quantity: self.quantity,
+                quantity: FixedPoint::from_decimal(self.quantity),
                 strategy: StrategyId::Inference,
                 cancel_replace: true,
             }],

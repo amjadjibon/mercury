@@ -2,9 +2,8 @@
 
 use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
+use mercury_core::{Exchange, Fill, FixedPoint, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
 use reqwest::Client;
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -241,9 +240,9 @@ impl ExchangeGateway for KrakenGateway {
                     "limit" => OrderType::Limit,
                     _ => OrderType::Market,
                 };
-                let price_dec: Decimal = o.descr.price.as_deref()?.parse().ok()?;
-                let price = if price_dec.is_zero() { None } else { Some(price_dec) };
-                let quantity: Decimal = o.vol.as_deref()?.parse().ok()?;
+                let price_fp = FixedPoint::from_str(o.descr.price.as_deref()?)?;
+                let price = if price_fp.is_zero() { None } else { Some(price_fp) };
+                let quantity = FixedPoint::from_str(o.vol.as_deref()?)?;
                 let order_id = txid
                     .bytes()
                     .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));

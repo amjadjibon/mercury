@@ -182,7 +182,7 @@ impl OrderManager {
             }
 
             // Update status
-            if order.filled_quantity >= order.order.quantity {
+            if order.filled_quantity >= order.order.quantity.to_decimal() {
                 order.status = OrderStatus::Filled;
             } else {
                 order.status = OrderStatus::PartiallyFilled;

@@ -2,7 +2,7 @@
 
 use crate::traits::{ExchangeGateway, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{EventBus, EventPayload, Exchange, Fill, Order, OrderId, Side, Symbol};
+use mercury_core::{EventBus, EventPayload, Exchange, Fill, FixedPoint, Order, OrderId, Side, Symbol};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -55,8 +55,8 @@ impl PaperGateway {
         tokio::spawn(async move {
             let mut orders: HashMap<OrderId, Order> = HashMap::new();
             let mut open_orders: Vec<OrderId> = Vec::new();
-            let mut current_bids: HashMap<Symbol, Decimal> = HashMap::new();
-            let mut current_asks: HashMap<Symbol, Decimal> = HashMap::new();
+            let mut current_bids: HashMap<Symbol, FixedPoint> = HashMap::new();
+            let mut current_asks: HashMap<Symbol, FixedPoint> = HashMap::new();
             let mut fill_counter: u64 = 0;
 
             info!("Paper matching engine started");
@@ -67,8 +67,8 @@ impl PaperGateway {
                     Some(event) = event_rx.recv() => {
                         match event.payload {
                             EventPayload::BookUpdate(update) => {
-                                let best_bid = update.bids.first().map(|l| l.price.to_decimal()).unwrap_or_default();
-                                let best_ask = update.asks.first().map(|l| l.price.to_decimal()).unwrap_or(Decimal::MAX);
+                                let best_bid = update.bids.first().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
+                                let best_ask = update.asks.first().map(|l| l.price).unwrap_or(FixedPoint(i64::MAX));
 
                                 current_bids.insert(update.symbol.clone(), best_bid);
                                 current_asks.insert(update.symbol.clone(), best_ask);
@@ -90,24 +90,22 @@ impl PaperGateway {
                                         let should_fill = match order.side {
                                             Side::Buy => {
                                                 if let Some(limit) = order.price {
-                                                    limit >= price // Limit crossed spread
+                                                    limit >= price
                                                 } else {
-                                                    price != Decimal::MAX // Market
+                                                    price != FixedPoint(i64::MAX) // Market
                                                 }
                                             }
                                             Side::Sell => {
-                                                 if let Some(limit) = order.price {
+                                                if let Some(limit) = order.price {
                                                     limit <= price
                                                 } else {
-                                                    price != Decimal::default()
+                                                    !price.is_zero()
                                                 }
                                             }
                                         };
 
                                         if should_fill {
                                              fill_counter += 1;
-                                             // Use simple heuristic for trade_id: order_id * 1000 + counter
-                                             // or just counter if u64
                                              let trade_id = fill_counter;
 
                                              let fill = Fill {
@@ -115,8 +113,8 @@ impl PaperGateway {
                                                 order_id: id,
                                                 symbol: order.symbol.clone(),
                                                 side: order.side,
-                                                price,
-                                                quantity: order.quantity,
+                                                price: price.to_decimal(),
+                                                quantity: order.quantity.to_decimal(),
                                                 fee: Decimal::ZERO,
                                                 fee_asset: "USDT".to_string(),
                                                 timestamp: mercury_core::types::now_nanos(),
@@ -142,11 +140,8 @@ impl PaperGateway {
 
                     // 2. New Order
                     Some(order) = order_rx.recv() => {
-                        // Latency simulated in submit_order (submitter side) or we could simulate matching latency here.
-
-                        // Try match immediately
-                        let best_bid = current_bids.get(&order.symbol).cloned().unwrap_or_default();
-                        let best_ask = current_asks.get(&order.symbol).cloned().unwrap_or(Decimal::MAX);
+                        let best_bid = current_bids.get(&order.symbol).cloned().unwrap_or(FixedPoint::ZERO);
+                        let best_ask = current_asks.get(&order.symbol).cloned().unwrap_or(FixedPoint(i64::MAX));
 
                         let price = if order.side == Side::Buy { best_ask } else { best_bid };
 
@@ -155,14 +150,14 @@ impl PaperGateway {
                                 if let Some(limit) = order.price {
                                     limit >= price
                                 } else {
-                                    price != Decimal::MAX
+                                    price != FixedPoint(i64::MAX)
                                 }
                             }
                             Side::Sell => {
                                 if let Some(limit) = order.price {
                                     limit <= price
                                 } else {
-                                    price != Decimal::default()
+                                    !price.is_zero()
                                 }
                             }
                         };
@@ -176,8 +171,8 @@ impl PaperGateway {
                                 order_id: order.id,
                                 symbol: order.symbol.clone(),
                                 side: order.side,
-                                price,
-                                quantity: order.quantity,
+                                price: price.to_decimal(),
+                                quantity: order.quantity.to_decimal(),
                                 fee: Decimal::ZERO,
                                 fee_asset: "USDT".to_string(),
                                 timestamp: mercury_core::types::now_nanos(),

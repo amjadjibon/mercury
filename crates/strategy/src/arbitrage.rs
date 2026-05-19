@@ -1,8 +1,7 @@
 //! Cross-exchange arbitrage strategy.
 
 use crate::traits::Strategy;
-use mercury_core::{Exchange, Fill, OrderBook, OrderId, OrderType, Side, Signal, StrategyId, Symbol, Trade};
-use rust_decimal::Decimal;
+use mercury_core::{Exchange, Fill, FixedPoint, OrderBook, OrderId, OrderType, Side, Signal, StrategyId, Symbol, Trade};
 use std::collections::HashMap;
 use tracing::info;
 
@@ -15,9 +14,9 @@ use tracing::info;
 /// the strategy is ready to fire again.
 pub struct ArbitrageStrategy {
     symbol: Symbol,
-    min_profit: Decimal,
-    bbo_cache: HashMap<Exchange, (Decimal, Decimal)>,
-    trade_quantity: Decimal,
+    min_profit: FixedPoint,
+    bbo_cache: HashMap<Exchange, (FixedPoint, FixedPoint)>,
+    trade_quantity: FixedPoint,
     /// Pending buy leg order id (None = no open position)
     pending_buy: Option<OrderId>,
     /// Pending sell leg order id
@@ -25,12 +24,12 @@ pub struct ArbitrageStrategy {
 }
 
 impl ArbitrageStrategy {
-    pub fn new(symbol: Symbol, min_profit: Decimal, trade_quantity: Decimal) -> Self {
+    pub fn new(symbol: Symbol, min_profit: impl Into<FixedPoint>, trade_quantity: impl Into<FixedPoint>) -> Self {
         Self {
             symbol,
-            min_profit,
+            min_profit: min_profit.into(),
             bbo_cache: HashMap::new(),
-            trade_quantity,
+            trade_quantity: trade_quantity.into(),
             pending_buy: None,
             pending_sell: None,
         }
@@ -50,7 +49,7 @@ impl ArbitrageStrategy {
                     continue;
                 }
 
-                let potential_profit = best_bid - best_ask;
+                let potential_profit = *best_bid - *best_ask;
                 if potential_profit > self.min_profit {
                     info!(
                         "Arbitrage opportunity: buy {:?} @ {}, sell {:?} @ {}, spread: {}",
@@ -93,8 +92,8 @@ impl Strategy for ArbitrageStrategy {
             return vec![];
         }
 
-        let best_bid = book.best_bid().map(|l| l.price.to_decimal()).unwrap_or(Decimal::ZERO);
-        let best_ask = book.best_ask().map(|l| l.price.to_decimal()).unwrap_or(Decimal::ZERO);
+        let best_bid = book.best_bid().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
+        let best_ask = book.best_ask().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
         self.bbo_cache.insert(book.exchange, (best_bid, best_ask));
 
         if self.has_pending() {
@@ -138,14 +137,16 @@ mod tests {
     use mercury_core::{BookUpdate, Level, Symbol};
     use rust_decimal_macros::dec;
 
-    fn book(exchange: Exchange, bid: Decimal, ask: Decimal) -> OrderBook {
+    fn book(exchange: Exchange, bid: impl Into<FixedPoint>, ask: impl Into<FixedPoint>) -> OrderBook {
         let sym = Symbol::new("BTCUSDT");
         let mut book = OrderBook::new(exchange, sym);
+        let bid_fp: FixedPoint = bid.into();
+        let ask_fp: FixedPoint = ask.into();
         book.apply_update(&BookUpdate::from_slices(
             exchange,
             sym,
-            &[Level::new(bid, dec!(1.0))],
-            &[Level::new(ask, dec!(1.0))],
+            &[Level::new(bid_fp, dec!(1.0))],
+            &[Level::new(ask_fp, dec!(1.0))],
             1,
             true,
         ));

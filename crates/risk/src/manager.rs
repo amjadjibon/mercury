@@ -363,8 +363,8 @@ mod tests {
             symbol: Symbol::new("BTCUSDT"),
             side: Side::Buy,
             order_type: OrderType::Limit,
-            price: Some(dec!(50000)),
-            quantity: dec!(0.2),
+            price: Some(dec!(50000).into()),
+            quantity: dec!(0.2).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
         };
@@ -432,7 +432,7 @@ mod tests {
             side: Side::Buy,
             order_type: OrderType::Market,
             price: None,
-            quantity: dec!(0.1),
+            quantity: dec!(0.1).into(),
             strategy: mercury_core::StrategyId::Unknown,
             cancel_replace: false,
         };

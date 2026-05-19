@@ -11,7 +11,7 @@
 
 use crate::traits::Strategy;
 use crate::volatility::VolatilityEstimator;
-use mercury_core::{Fill, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Trade};
+use mercury_core::{Fill, FixedPoint, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Trade};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
@@ -175,10 +175,11 @@ impl Strategy for MarketMaker {
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {
         self.tick_count += 1;
 
-        let mid = match book.mid_price() {
+        let mid_fp = match book.mid_price() {
             Some(m) => m,
             None => return vec![],
         };
+        let mid = mid_fp.to_decimal();
 
         // Update variance on every tick (not just quote ticks).
         self.update_variance(mid);
@@ -203,8 +204,8 @@ impl Strategy for MarketMaker {
                 symbol: book.symbol,
                 side: Side::Buy,
                 order_type: OrderType::Limit,
-                price: Some(bid_price),
-                quantity: self.order_size,
+                price: Some(FixedPoint::from_decimal(bid_price)),
+                quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: true,
             },
@@ -212,8 +213,8 @@ impl Strategy for MarketMaker {
                 symbol: book.symbol,
                 side: Side::Sell,
                 order_type: OrderType::Limit,
-                price: Some(ask_price),
-                quantity: self.order_size,
+                price: Some(FixedPoint::from_decimal(ask_price)),
+                quantity: FixedPoint::from_decimal(self.order_size),
                 strategy: self.id(),
                 cancel_replace: true,
             },

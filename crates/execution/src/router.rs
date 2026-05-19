@@ -1,8 +1,7 @@
 //! Smart Order Router (SOR) for best-execution across multiple exchanges.
 
-use mercury_core::{BookUpdate, Event, EventPayload, Exchange, Side, Symbol};
+use mercury_core::{BookUpdate, Event, EventPayload, Exchange, FixedPoint, Side, Symbol};
 use mercury_gateway::ExchangeGateway;
-use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tracing::debug;
@@ -10,8 +9,8 @@ use tracing::debug;
 /// Best Bid and Offer (BBO) cache.
 #[derive(Debug, Clone, Copy)]
 pub struct Bbo {
-    pub bid: Decimal,
-    pub ask: Decimal,
+    pub bid: FixedPoint,
+    pub ask: FixedPoint,
     pub timestamp: i64,
 }
 
@@ -46,8 +45,8 @@ impl SmartOrderRouter {
     }
 
     fn update_bbo(&self, update: &BookUpdate) {
-        let best_bid = update.bids.first().map(|l| l.price.to_decimal()).unwrap_or_default();
-        let best_ask = update.asks.first().map(|l| l.price.to_decimal()).unwrap_or_default();
+        let best_bid = update.bids.first().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
+        let best_ask = update.asks.first().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
 
         if best_bid.is_zero() && best_ask.is_zero() {
             return;
@@ -57,8 +56,8 @@ impl SmartOrderRouter {
         let entry = cache
             .entry((update.symbol, update.exchange))
             .or_insert(Bbo {
-                bid: Decimal::ZERO,
-                ask: Decimal::ZERO,
+                bid: FixedPoint::ZERO,
+                ask: FixedPoint::ZERO,
                 timestamp: 0,
             });
 
@@ -78,27 +77,23 @@ impl SmartOrderRouter {
         &self,
         symbol: Symbol,
         side: Side,
-        _qty: Decimal,
-    ) -> Option<(Exchange, Decimal)> {
+        _qty: FixedPoint,
+    ) -> Option<(Exchange, FixedPoint)> {
         let cache = self.bbo_cache.read().unwrap();
 
         let mut best_exchange = None;
-        let mut best_price = Decimal::ZERO;
+        let mut best_price = FixedPoint::ZERO;
 
-        // Iterate over registered gateways to ensure we only route to connected exchanges
         for exchange in self.gateways.keys() {
             if let Some(bbo) = cache.get(&(symbol, *exchange)) {
                 match side {
                     Side::Buy => {
-                        // Buying: looking for lowest Ask
-                        if best_price.is_zero() || (bbo.ask > Decimal::ZERO && bbo.ask < best_price)
-                        {
+                        if best_price.is_zero() || (!bbo.ask.is_zero() && bbo.ask < best_price) {
                             best_price = bbo.ask;
                             best_exchange = Some(*exchange);
                         }
                     }
                     Side::Sell => {
-                        // Selling: looking for highest Bid
                         if bbo.bid > best_price {
                             best_price = bbo.bid;
                             best_exchange = Some(*exchange);
@@ -134,12 +129,12 @@ mod tests {
     use mercury_core::{BookUpdate, Exchange, Level, Symbol};
     use rust_decimal_macros::dec;
 
-    fn make_update(exchange: Exchange, bid: rust_decimal::Decimal, ask: rust_decimal::Decimal) -> BookUpdate {
+    fn make_update(exchange: Exchange, bid: impl Into<FixedPoint>, ask: impl Into<FixedPoint>) -> BookUpdate {
         BookUpdate::from_slices(
             exchange,
             Symbol::new("BTCUSDT"),
-            &[Level::new(bid, dec!(1.0))],
-            &[Level::new(ask, dec!(1.0))],
+            &[Level::new(bid.into(), dec!(1.0))],
+            &[Level::new(ask.into(), dec!(1.0))],
             1,
             true,
         )
@@ -174,11 +169,11 @@ mod tests {
         let mut cache = sor.bbo_cache.write().unwrap();
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Binance),
-            Bbo { bid: dec!(50000), ask: dec!(50010), timestamp: 1 },
+            Bbo { bid: dec!(50000).into(), ask: dec!(50010).into(), timestamp: 1 },
         );
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Coinbase),
-            Bbo { bid: dec!(49990), ask: dec!(50005), timestamp: 1 },
+            Bbo { bid: dec!(49990).into(), ask: dec!(50005).into(), timestamp: 1 },
         );
         drop(cache);
 
@@ -213,7 +208,7 @@ mod tests {
         });
 
         let (exchange, price) = sor
-            .find_best_execution(Symbol::new("BTCUSDT"), Side::Buy, dec!(0.1))
+            .find_best_execution(Symbol::new("BTCUSDT"), Side::Buy, dec!(0.1).into())
             .expect("should find execution");
 
         // Coinbase has lower ask (50005 < 50010)
@@ -227,16 +222,16 @@ mod tests {
         let mut cache = sor.bbo_cache.write().unwrap();
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Binance),
-            Bbo { bid: dec!(50000), ask: dec!(50010), timestamp: 1 },
+            Bbo { bid: dec!(50000).into(), ask: dec!(50010).into(), timestamp: 1 },
         );
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Coinbase),
-            Bbo { bid: dec!(50020), ask: dec!(50030), timestamp: 1 },
+            Bbo { bid: dec!(50020).into(), ask: dec!(50030).into(), timestamp: 1 },
         );
         drop(cache);
         // No gateways = None
         assert!(
-            sor.find_best_execution(Symbol::new("BTCUSDT"), Side::Sell, dec!(0.1))
+            sor.find_best_execution(Symbol::new("BTCUSDT"), Side::Sell, dec!(0.1).into())
                 .is_none()
         );
     }

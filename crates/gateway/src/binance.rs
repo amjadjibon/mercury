@@ -12,7 +12,7 @@
 use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
+use mercury_core::{Exchange, Fill, FixedPoint, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
 use reqwest::Client;
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -354,8 +354,8 @@ impl ExchangeGateway for BinanceGateway {
         let orders = raw.into_iter().filter_map(|r| {
             let side = match r.side.as_str() { "BUY" => Side::Buy, "SELL" => Side::Sell, _ => return None };
             let order_type = match r.order_type.as_str() { "LIMIT" => OrderType::Limit, _ => OrderType::Market };
-            let price_dec: Decimal = r.price.parse().ok()?;
-            let price = if price_dec.is_zero() { None } else { Some(price_dec) };
+            let price_fp = FixedPoint::from_str(&r.price)?;
+            let price = if price_fp.is_zero() { None } else { Some(price_fp) };
             Some(Order {
                 id:             r.order_id,
                 exchange:       Exchange::Binance,
@@ -363,7 +363,7 @@ impl ExchangeGateway for BinanceGateway {
                 side,
                 order_type,
                 price,
-                quantity:       r.orig_qty.parse().ok()?,
+                quantity:       FixedPoint::from_str(&r.orig_qty)?,
                 time_in_force:  TimeInForce::GTC,
                 created_at:     (r.time * 1_000_000) as i64,
             })

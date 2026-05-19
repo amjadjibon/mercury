@@ -1,7 +1,6 @@
 use crate::models::TradeModel;
 use anyhow::Result;
 use mercury_core::{Event, EventPayload, Fill, MLPrediction, Signal};
-use rust_decimal::prelude::ToPrimitive;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use std::path::Path;
 use tracing::{error, info};
@@ -71,8 +70,8 @@ impl StorageManager {
             mercury_core::Side::Sell => "SELL",
         };
         let order_type = format!("{:?}", signal.order_type);
-        let price = signal.price.and_then(|p| p.to_f64());
-        let qty = signal.quantity.to_f64().unwrap_or(0.0);
+        let price = signal.price.map(|p| p.to_f64());
+        let qty = signal.quantity.to_f64();
         let now = mercury_core::now_nanos();
 
         sqlx::query(

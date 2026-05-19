@@ -168,6 +168,7 @@ pub enum StrategyId {
     Rsi = 2,
     Arbitrage = 3,
     Inference = 4,
+    Pairs = 5,
     Unknown = 255,
 }
 
@@ -179,6 +180,7 @@ impl StrategyId {
             Self::Rsi => "RSI",
             Self::Arbitrage => "Arbitrage",
             Self::Inference => "Inference",
+            Self::Pairs => "Pairs",
             Self::Unknown => "Unknown",
         }
     }
@@ -190,8 +192,8 @@ pub struct Signal {
     pub symbol: Symbol,
     pub side: Side,
     pub order_type: OrderType,
-    pub price: Option<Price>,
-    pub quantity: Quantity,
+    pub price: Option<FixedPoint>,
+    pub quantity: FixedPoint,
     pub strategy: StrategyId,
     #[serde(default)]
     pub cancel_replace: bool,
@@ -205,8 +207,8 @@ pub struct Order {
     pub symbol: Symbol,
     pub side: Side,
     pub order_type: OrderType,
-    pub price: Option<Price>,
-    pub quantity: Quantity,
+    pub price: Option<FixedPoint>,
+    pub quantity: FixedPoint,
     pub time_in_force: TimeInForce,
     pub created_at: Timestamp,
 }
@@ -218,8 +220,8 @@ impl Order {
         exchange: Exchange,
         symbol: Symbol,
         side: Side,
-        price: Price,
-        quantity: Quantity,
+        price: impl Into<FixedPoint>,
+        quantity: impl Into<FixedPoint>,
     ) -> Self {
         Self {
             id,
@@ -227,8 +229,8 @@ impl Order {
             symbol,
             side,
             order_type: OrderType::Limit,
-            price: Some(price),
-            quantity,
+            price: Some(price.into()),
+            quantity: quantity.into(),
             time_in_force: TimeInForce::GTC,
             created_at: now_nanos(),
         }
@@ -240,7 +242,7 @@ impl Order {
         exchange: Exchange,
         symbol: Symbol,
         side: Side,
-        quantity: Quantity,
+        quantity: impl Into<FixedPoint>,
     ) -> Self {
         Self {
             id,
@@ -249,7 +251,7 @@ impl Order {
             side,
             order_type: OrderType::Market,
             price: None,
-            quantity,
+            quantity: quantity.into(),
             time_in_force: TimeInForce::IOC,
             created_at: now_nanos(),
         }
@@ -306,7 +308,7 @@ mod tests {
             dec!(0.1),
         );
         assert_eq!(order.order_type, OrderType::Limit);
-        assert_eq!(order.price, Some(dec!(50000)));
+        assert_eq!(order.price.unwrap(), dec!(50000));
     }
 
     #[test]

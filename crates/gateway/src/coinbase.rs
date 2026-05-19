@@ -2,9 +2,8 @@
 
 use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
+use mercury_core::{Exchange, Fill, FixedPoint, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
 use reqwest::Client;
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -110,7 +109,7 @@ impl ExchangeGateway for CoinbaseGateway {
 
         let order_config = match order.order_type {
             OrderType::Limit => {
-                let price = order.price.unwrap_or(Decimal::ZERO).to_string();
+                let price = order.price.unwrap_or(mercury_core::FixedPoint::ZERO).to_string();
                 serde_json::json!({
                     "limit_limit_gtc": {
                         "base_size": order.quantity.to_string(),
@@ -273,8 +272,8 @@ impl ExchangeGateway for CoinbaseGateway {
                     symbol,
                     side,
                     order_type: OrderType::Limit,
-                    price: r.limit_price.and_then(|p| p.parse().ok()),
-                    quantity: r.base_size.parse().ok()?,
+                    price: r.limit_price.and_then(|p| FixedPoint::from_str(&p)),
+                    quantity: FixedPoint::from_str(&r.base_size)?,
                     time_in_force: TimeInForce::GTC,
                     created_at: 0,
                 })

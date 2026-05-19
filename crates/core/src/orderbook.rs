@@ -5,8 +5,7 @@
 //! no pointer chasing, vs. BTreeMap's B-tree node traversal.
 
 use crate::events::{BookUpdate, Level};
-use crate::types::{Exchange, FixedPoint, Price, Quantity, Symbol};
-use rust_decimal::Decimal;
+use crate::types::{Exchange, FixedPoint, Symbol};
 
 /// L2 Order Book maintaining price levels.
 #[derive(Debug, Clone)]
@@ -19,7 +18,7 @@ pub struct OrderBook {
     asks: Vec<Level>,
     pub sequence: u64,
     /// Cached mid-price; updated on every `apply_update` to avoid recomputation.
-    cached_mid: Option<Price>,
+    cached_mid: Option<FixedPoint>,
 }
 
 impl OrderBook {
@@ -49,11 +48,9 @@ impl OrderBook {
 
         self.sequence = update.sequence;
 
-        // Recompute cached mid after every update.
+        // Recompute cached mid after every update — pure i64 arithmetic, no Decimal.
         self.cached_mid = match (self.bids.first(), self.asks.first()) {
-            (Some(bid), Some(ask)) => {
-                Some((bid.price.to_decimal() + ask.price.to_decimal()) / Decimal::TWO)
-            }
+            (Some(bid), Some(ask)) => Some(FixedPoint((bid.price.0 + ask.price.0) / 2)),
             _ => None,
         };
     }
@@ -66,24 +63,25 @@ impl OrderBook {
         self.asks.first().copied()
     }
 
-    pub fn mid_price(&self) -> Option<Price> {
+    pub fn mid_price(&self) -> Option<FixedPoint> {
         self.cached_mid
     }
 
-    pub fn spread(&self) -> Option<Price> {
+    pub fn spread(&self) -> Option<FixedPoint> {
         match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => Some(ask.price.to_decimal() - bid.price.to_decimal()),
+            (Some(bid), Some(ask)) => Some(ask.price - bid.price),
             _ => None,
         }
     }
 
-    pub fn spread_bps(&self) -> Option<Price> {
-        match (self.mid_price(), self.spread()) {
-            (Some(mid), Some(spread)) if mid > Decimal::ZERO => {
-                Some(spread / mid * Decimal::from(10000))
-            }
-            _ => None,
+    pub fn spread_bps(&self) -> Option<FixedPoint> {
+        let mid = self.cached_mid?;
+        let spread = self.spread()?;
+        if mid.is_zero() {
+            return None;
         }
+        // (spread / mid) * 10_000 — all i64 arithmetic via FixedPoint ops
+        Some(spread / mid * FixedPoint::from(10_000i64))
     }
 
     pub fn top_bids(&self, n: usize) -> Vec<Level> {
@@ -94,21 +92,19 @@ impl OrderBook {
         self.asks.iter().take(n).copied().collect()
     }
 
-    pub fn bid_depth(&self, up_to_price: Price) -> Quantity {
-        let threshold = FixedPoint::from_decimal(up_to_price);
+    pub fn bid_depth(&self, up_to_price: FixedPoint) -> FixedPoint {
         self.bids
             .iter()
-            .filter(|l| l.price >= threshold)
-            .map(|l| l.quantity.to_decimal())
+            .filter(|l| l.price >= up_to_price)
+            .map(|l| l.quantity)
             .sum()
     }
 
-    pub fn ask_depth(&self, up_to_price: Price) -> Quantity {
-        let threshold = FixedPoint::from_decimal(up_to_price);
+    pub fn ask_depth(&self, up_to_price: FixedPoint) -> FixedPoint {
         self.asks
             .iter()
-            .filter(|l| l.price <= threshold)
-            .map(|l| l.quantity.to_decimal())
+            .filter(|l| l.price <= up_to_price)
+            .map(|l| l.quantity)
             .sum()
     }
 
@@ -172,6 +168,8 @@ mod tests {
     use super::*;
     use crate::types::Exchange;
     use rust_decimal_macros::dec;
+    #[allow(unused_imports)]
+    use crate::types::FixedPoint;
 
     fn sample_book() -> OrderBook {
         let mut book = OrderBook::new(Exchange::Binance, Symbol::new("BTCUSDT"));

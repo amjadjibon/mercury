@@ -116,7 +116,7 @@ impl SimulatedExchange {
         fills.extend(self.match_orders(Side::Buy, best_ask));
         fills.extend(self.match_orders(Side::Sell, best_bid));
         if let Some(mid) = self.book.mid_price() {
-            self.update_pnl(mid);
+            self.update_pnl(mid.to_decimal());
         }
         fills
     }
@@ -142,7 +142,7 @@ impl SimulatedExchange {
                     continue;
                 }
                 let should_fill = match side {
-                    Side::Buy => order.price.map_or(true, |p| p >= market_price),
+                    Side::Buy => order.price.map_or(true, |p| p >= market_price),   // PartialOrd<Decimal> for FixedPoint
                     Side::Sell => order.price.map_or(true, |p| p <= market_price),
                 };
                 if should_fill {
@@ -166,7 +166,7 @@ impl SimulatedExchange {
     }
 
     fn fill_order(&mut self, order: Order, price: Decimal) -> Fill {
-        let quantity = order.quantity;
+        let quantity = order.quantity.to_decimal();
         let cost = price * quantity;
         match order.side {
             Side::Buy => {

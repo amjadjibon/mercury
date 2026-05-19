@@ -251,10 +251,8 @@ fn run_app(
                         if tab.symbol == update.symbol {
                             tab.book.apply_update(&update);
                             if let Some(mid) = tab.book.mid_price() {
-                                if let Some(p) = mid.to_f64() {
-                                    tab.on_price(p);
-                                }
-                                tab.unrealized_pnl = tab.pnl_tracker.unrealized_pnl(tab.symbol, mid);
+                                tab.on_price(mid.to_f64());
+                                tab.unrealized_pnl = tab.pnl_tracker.unrealized_pnl(tab.symbol, mid.to_decimal());
                             }
                         }
                     }
@@ -346,13 +344,13 @@ fn ui(f: &mut Frame, app: &App) {
     let spread_str = tab
         .book
         .spread_bps()
-        .map(|s| format!("{:.2} bps", s))
+        .map(|s| format!("{:.2} bps", s.to_f64()))
         .unwrap_or_else(|| "–".to_string());
 
     let mid_str = tab
         .book
         .mid_price()
-        .map(|m| format!("{:.2}", m))
+        .map(|m| format!("{:.2}", m.to_f64()))
         .unwrap_or_else(|| "–".to_string());
 
     let kill_span = if app.kill_switch {

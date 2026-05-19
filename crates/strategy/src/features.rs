@@ -96,9 +96,9 @@ impl FeatureComputer {
     /// Compute the 10-element feature vector from an `OrderBook` snapshot.
     /// Returns `None` if the book is invalid (no best bid/ask).
     pub fn compute(&mut self, book: &OrderBook) -> Option<[f32; FEATURE_COUNT]> {
-        let mid = book.mid_price()?;
-        let spread = book.spread().unwrap_or(Decimal::ZERO);
-        let spread_bps = book.spread_bps().unwrap_or(Decimal::ZERO);
+        let mid = book.mid_price()?.to_decimal();
+        let spread = book.spread().unwrap_or_default().to_decimal();
+        let spread_bps = book.spread_bps().unwrap_or_default().to_decimal();
 
         // Update indicators
         let rsi_val = self.rsi.update(mid).unwrap_or(Decimal::from(50));

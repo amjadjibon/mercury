@@ -2,9 +2,8 @@
 
 use crate::traits::{ExchangeGateway, GatewayError, GatewayResult};
 use async_trait::async_trait;
-use mercury_core::{Exchange, Fill, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
+use mercury_core::{Exchange, Fill, FixedPoint, Order, OrderId, OrderType, Side, Symbol, TimeInForce};
 use reqwest::Client;
-use rust_decimal::Decimal;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -283,9 +282,9 @@ impl ExchangeGateway for OkxGateway {
                     "limit" => OrderType::Limit,
                     _ => OrderType::Market,
                 };
-                let price_dec: Decimal = r.px.as_deref()?.parse().ok()?;
-                let price = if price_dec.is_zero() { None } else { Some(price_dec) };
-                let quantity: Decimal = r.sz.as_deref()?.parse().ok()?;
+                let price_fp = FixedPoint::from_str(r.px.as_deref()?)?;
+                let price = if price_fp.is_zero() { None } else { Some(price_fp) };
+                let quantity = FixedPoint::from_str(r.sz.as_deref()?)?;
                 let order_id: OrderId = r.ord_id.as_deref()?.parse().ok()?;
                 let ts_ns: i64 = r.c_time.as_deref()?.parse::<i64>().ok()? * 1_000_000;
                 Some(Order {
