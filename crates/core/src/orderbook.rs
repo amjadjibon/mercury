@@ -122,6 +122,20 @@ impl OrderBook {
     pub fn ask_levels(&self) -> usize {
         self.asks.len()
     }
+
+    /// Order book imbalance over the top `n` levels: (bid_qty − ask_qty) / (bid_qty + ask_qty).
+    ///
+    /// Returns a value in `[−1.0, 1.0]`:  +1.0 = all volume on the bid, −1.0 = all on the ask.
+    /// Returns `0.0` when both sides are empty or `n == 0`.
+    pub fn imbalance(&self, n: usize) -> f64 {
+        let bid_sum: i64 = self.bids.iter().take(n).map(|l| l.quantity.0).sum();
+        let ask_sum: i64 = self.asks.iter().take(n).map(|l| l.quantity.0).sum();
+        let total = bid_sum + ask_sum;
+        if total == 0 {
+            return 0.0;
+        }
+        (bid_sum - ask_sum) as f64 / total as f64
+    }
 }
 
 /// Insert or update a bid level (sorted descending by price).

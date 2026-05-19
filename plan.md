@@ -1,6 +1,6 @@
 # Mercury — Roadmap
 
-Build is clean, 72 tests pass. All original items complete.
+Build is clean, 98 tests pass. All original items complete.
 This file tracks what comes next.
 
 ---
@@ -11,11 +11,19 @@ This file tracks what comes next.
 
 - [x] **Pairs statistical arbitrage** — OLS hedge ratio β = Cov(Y,X)/Var(X) on a rolling window. Entry when |z| > 2σ, exit when |z| < 0.5. `PairsStrategy` in `crates/strategy/src/pairs.rs`; `StrategyId::Pairs = 5` added to core.
 
-- [ ] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. Add `HawkesIntensity` struct in `crates/strategy/src/features.rs`, feed as feature 10 into `FeatureComputer`.
+- [x] **Order book imbalance (OBI) strategy** — `imbalance = (bid_qty − ask_qty) / (bid_qty + ask_qty)` summed over top-N levels. Buy when imbalance > threshold, sell when < −threshold; exit when |imb| < exit_threshold. `ObiStrategy` in `crates/strategy/src/obi.rs`; `OrderBook::imbalance(n)` in `crates/core/src/orderbook.rs`; `StrategyId::Obi = 6`. Note: not wired into `FeatureComputer` (would bump `FEATURE_COUNT` and break ONNX model input shape).
+
+- [x] **Triangular arbitrage** — detect risk-free cycle across three pairs on one exchange. Forward: profit = bid_BTCUSDT × bid_ETHBTC / ask_ETHUSDT − 1. Reverse: profit = bid_ETHUSDT / (ask_BTCUSDT × ask_ETHBTC) − 1. Fires 3 market-order signals when either profit > `min_profit`. `TriangularStrategy` in `crates/strategy/src/triangular.rs`; `StrategyId::Triangular = 7`.
+
+- [ ] **Hawkes process trade arrival** — self-exciting point process; intensity λ(t) = μ + Σ α·exp(-β·(t-tᵢ)). Predicts short-term order flow bursts. Add `HawkesIntensity` struct in `crates/strategy/src/features.rs`, feed as feature 11 into `FeatureComputer`.
 
 - [ ] **Regime detection (HMM)** — 2-state Hidden Markov Model (trending vs mean-reverting). Switch strategy parameters based on detected regime. Add `HmmFilter` in `crates/strategy/src/regime.rs`.
 
 - [ ] **Spoofing / iceberg detection** — spoofing: large quote appears then cancels before fill (track cancel-rate per price level). Iceberg: repeated fills at same price despite thin visible qty. Add to `crates/risk/src/manager.rs` as a signal quality filter.
+
+- [ ] **Volume prediction** — rolling ADV (average daily volume) estimator using exponential decay: `ADV_t = α·V_t + (1−α)·ADV_{t−1}`. Exposes predicted volume as input to TWAP pacing and the Almgren-Chriss impact model. Add `VolumeEstimator` in `crates/strategy/src/features.rs`.
+
+- [ ] **Sentiment / news signal** — consume a REST or WebSocket news feed (e.g. Benzinga, CryptoPanic), run keyword scoring (+/− words), emit a `SentimentSignal` on the event bus within 50 ms of headline. Add `NewsParser` in `crates/market/src/news.rs` and `SentimentStrategy` in `crates/strategy/src/sentiment.rs`.
 
 ---
 
@@ -28,6 +36,8 @@ This file tracks what comes next.
 - [ ] **Peg orders** — re-quote at `best_bid ± tick` on every book update instead of cancel/replace. MarketMaker currently does cancel-replace; add a `peg_mode` flag that only re-quotes when the best price moves. File: `crates/strategy/src/market_maker.rs`.
 
 - [ ] **IOC / FOK time-in-force** — Immediate-Or-Cancel and Fill-Or-Kill needed for taker momentum strategies. Add variants to `TimeInForce` enum in `crates/core/src/types.rs`, wire through Binance/OKX/Bybit gateways.
+
+- [ ] **Liquidity detection (probing)** — send a small resting limit order 1 tick inside the spread; if filled quickly, infer a hidden iceberg and scale in. Track probe fills separately in `OrderManager`. Add `LiquidityProber` in `crates/execution/src/probe.rs`.
 
 ---
 
@@ -47,7 +57,7 @@ This file tracks what comes next.
 
 - [x] **Realised volatility estimator** — 5-minute Parkinson estimator: `σ² = (ln(H/L))² / (4·ln2)`. Add `VolatilityEstimator` in `crates/strategy/src/volatility.rs`. Wired into MarketMaker — overrides EMA variance once warm (≥2 bars).
 
-- [ ] **Price impact model (Almgren-Chriss)** — `impact = η · σ · sqrt(Q / ADV)` where ADV is average daily volume. Warn before submitting orders that would move the book. Add to `crates/risk/src/manager.rs` as a pre-trade check.
+- [ ] **Price impact model (Almgren-Chriss)** — `impact = η · σ · sqrt(Q / ADV)` where ADV is average daily volume. Warn before submitting orders that would move the book. Add to `crates/risk/src/manager.rs` as a pre-trade check. Requires `VolumeEstimator` above.
 
 - [ ] **Queue position / fill probability** — estimate P(fill) at each price level from queue depth and historical fill rate. Use to choose limit vs market: if P(fill) < 0.4, send market order instead. Add `FillProbabilityModel` in `crates/execution/src/queue_model.rs`.
 
@@ -73,8 +83,6 @@ This file tracks what comes next.
 
 - [ ] **`Arc<BookUpdate>` on event bus** — `BookUpdate` is 480 bytes; with 4 subscribers each copy costs ~1920 bytes per tick. Wrap in `Arc` so the bus stores one copy and subscribers share it. Change `EventPayload::BookUpdate(BookUpdate)` to `EventPayload::BookUpdate(Arc<BookUpdate>)`. File: `crates/core/src/events.rs`.
 
-- [ ] **`i64` fixed-point prices** — `rust_decimal` division is ~30× slower than `f64`; `f64` has rounding errors. Use `i64` with implicit 8 decimal places (`price_i64 / 1e8`). Replace `Decimal` in hot-path structs (`Level`, `BookUpdate`, `Order`). Biggest latency win available.
-
 - [x] **WebSocket fill delivery** — Binance `listenKey` + user data stream implemented in `crates/gateway/src/binance.rs`. Parses `executionReport` events with `execType=TRADE`. Keepalive task runs every 30 min.
 
 - [ ] **Feed reconnect tests** — reconnect logic in `crates/market/src/feed.rs` is untested. Add a test that simulates a dropped connection using a mock WebSocket server and asserts reconnect with backoff.
@@ -90,3 +98,56 @@ This file tracks what comes next.
 5. ~~TWAP slicer~~ ✅
 6. ~~`i64` fixed-point~~ ✅
 7. ~~Pairs stat-arb~~ ✅
+8. ~~Order book imbalance~~ ✅
+9. ~~Triangular arbitrage~~ ✅
+10. Volume prediction + Almgren-Chriss impact (dependency chain)
+11. Inventory skew wired to MarketMaker
+12. Correlation-aware position limits
+13. IOC/FOK + Post-only TIF
+14. Queue position / fill probability
+15. Spoofing / iceberg detection
+16. Spread decomposition (TUI metric)
+17. Hawkes process
+18. Regime detection (HMM)
+19. Liquidity probing
+20. Online learning (ML fallback)
+21. Sentiment / news signal
+22. Full LOB CNN input
+23. `Arc<BookUpdate>` bus optimization
+24. Feed reconnect tests
+25. `SO_BUSY_POLL` + NIC timestamps (Linux only)
+26. RL quote placement (research-grade)
+
+---
+
+## HFT strategies coverage map (vs daytrading.com/hft-strategies)
+
+| Strategy | Status |
+|---|---|
+| Market Making | ✅ Avellaneda-Stoikov |
+| Statistical Arbitrage / Pair Trading | ✅ PairsStrategy |
+| Cross-Market / Index Arbitrage | ✅ ArbitrageStrategy |
+| TWAP / VWAP | ✅ TwapExecutor |
+| Momentum | ✅ MomentumStrategy |
+| Mean Reversion | ✅ RsiStrategy |
+| ML Models | ✅ InferenceStrategy (ONNX) |
+| Tick Data / FixedPoint hot path | ✅ FixedPoint i64 |
+| Order Book Imbalance | ✅ ObiStrategy |
+| Triangular Arbitrage | ✅ TriangularStrategy |
+| Volume Prediction | 📋 #10 |
+| Price Impact (Almgren-Chriss) | 📋 #10 |
+| Inventory Skew | 📋 #11 |
+| Correlation Position Limits | 📋 #12 |
+| IOC / FOK / Post-only | 📋 #13 |
+| Queue / Fill Probability | 📋 #14 |
+| Iceberg / Spoofing Detection | 📋 #15 |
+| Spread Decomposition | 📋 #16 |
+| Hawkes Process (Order Flow) | 📋 #17 |
+| Regime Detection (HMM) | 📋 #18 |
+| Liquidity Detection / Probing | 📋 #19 |
+| Online Learning (SGD) | 📋 #20 |
+| Sentiment / News Signal | 📋 #21 |
+| Full LOB CNN | 📋 #22 |
+| RL Quote Placement (DQN) | 📋 #26 |
+| Quote Stuffing | ❌ unethical/illegal — not implementing |
+| Regulatory Latency Arbitrage | ❌ out of scope |

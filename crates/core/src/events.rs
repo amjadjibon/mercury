@@ -169,6 +169,8 @@ pub enum StrategyId {
     Arbitrage = 3,
     Inference = 4,
     Pairs = 5,
+    Obi = 6,
+    Triangular = 7,
     Unknown = 255,
 }
 
@@ -181,6 +183,8 @@ impl StrategyId {
             Self::Arbitrage => "Arbitrage",
             Self::Inference => "Inference",
             Self::Pairs => "Pairs",
+            Self::Obi => "OBI",
+            Self::Triangular => "Triangular",
             Self::Unknown => "Unknown",
         }
     }
