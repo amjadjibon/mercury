@@ -32,7 +32,7 @@ pub struct OkxGateway {
     client: Client,
     #[allow(dead_code)]
     fill_tx: mpsc::Sender<Fill>,
-    fill_rx: Option<mpsc::Receiver<Fill>>,
+    _fill_rx: Option<mpsc::Receiver<Fill>>,
 }
 
 impl OkxGateway {
@@ -42,7 +42,7 @@ impl OkxGateway {
             config,
             client: Client::new(),
             fill_tx,
-            fill_rx: Some(fill_rx),
+            _fill_rx: Some(fill_rx),
         }
     }
 
