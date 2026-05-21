@@ -14,6 +14,10 @@ members = [
     "crates/benches", "crates/storage",
 ]
 
+[workspace.metadata.tools]
+# Dev tools — install once with: cargo install <name>
+mdbook = "0.5"
+
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
