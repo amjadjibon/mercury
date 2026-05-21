@@ -1,0 +1,1240 @@
+<!DOCTYPE HTML>
+<html lang="en" class="navy sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Mercury Trading Engine</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-0392ca55.css">
+        <link rel="stylesheet" href="css/chrome-fc474251.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "navy";
+            const default_dark_theme = "ayu";
+            window.path_to_searchindex_js = "searchindex-dec1bb0e.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-bf1706a4.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('navy')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Mercury Trading Engine</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+                        <a href="https://github.com/amjadjibon/mercury" title="Git repository" aria-label="Git repository">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="mercury-trading-engine"><a class="header" href="#mercury-trading-engine">Mercury Trading Engine</a></h1>
+<p>Mercury is a high-performance, event-driven algorithmic trading engine written in Rust. It is designed for low-latency market-making, momentum, and ML-based strategies across multiple exchanges.</p>
+<h2 id="key-features"><a class="header" href="#key-features">Key features</a></h2>
+<ul>
+<li><strong>Event-driven core</strong> — all components communicate through a single lock-free <code>EventBus</code> backed by a crossbeam bounded channel.</li>
+<li><strong>Multiple exchanges</strong> — Binance, Coinbase, Bybit, Kraken, OKX, and Yahoo Finance (equities).</li>
+<li><strong>Paper trading</strong> — built-in <code>PaperGateway</code> with configurable simulated latency; no API keys needed.</li>
+<li><strong>Backtesting</strong> — deterministic replay of recorded Parquet tick data.</li>
+<li><strong>ML strategies</strong> — ONNX-based inference, online logistic regression, and reinforcement learning.</li>
+<li><strong>Risk controls</strong> — position limits, daily-loss guard, per-order rate limiting, and a kill switch.</li>
+<li><strong>TUI monitor</strong> — real-time ratatui dashboard connected via Unix socket IPC.</li>
+<li><strong>Prometheus metrics</strong> — latency histograms (HDR), PnL tracking, and Prometheus export.</li>
+</ul>
+<h2 id="design-philosophy"><a class="header" href="#design-philosophy">Design philosophy</a></h2>
+<p>Mercury favors explicitness and performance over abstraction. Financial values use <code>rust_decimal::Decimal</code> throughout — no floating-point arithmetic on prices or quantities. Hot-path data structures are stack-allocated where possible (e.g. <code>Symbol</code> is a <code>[u8; 16]</code> array).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="installation"><a class="header" href="#installation">Installation</a></h1>
+<h2 id="prerequisites"><a class="header" href="#prerequisites">Prerequisites</a></h2>
+<ul>
+<li>Rust toolchain ≥ 1.85 (edition 2024) — install via <a href="https://rustup.rs">rustup</a></li>
+<li>SQLite (system library, used by sqlx)</li>
+<li>OpenSSL or native-tls (used by reqwest / tokio-tungstenite)</li>
+</ul>
+<p>On macOS:</p>
+<pre><code class="language-bash">brew install openssl sqlite
+</code></pre>
+<p>On Ubuntu/Debian:</p>
+<pre><code class="language-bash">apt install libssl-dev libsqlite3-dev pkg-config
+</code></pre>
+<h2 id="build"><a class="header" href="#build">Build</a></h2>
+<pre><code class="language-bash">git clone https://github.com/amjadjibon/mercury
+cd mercury
+cargo build --workspace --release
+</code></pre>
+<h2 id="dev-tools"><a class="header" href="#dev-tools">Dev tools</a></h2>
+<p>The following tools are used for documentation and benchmarking. Install them once:</p>
+<pre><code class="language-bash">cargo install mdbook           # build this book
+cargo install cargo-criterion  # benchmark runner
+</code></pre>
+<h2 id="verify"><a class="header" href="#verify">Verify</a></h2>
+<pre><code class="language-bash">cargo test --workspace
+</code></pre>
+<p>All tests should pass with no warnings.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="quick-start"><a class="header" href="#quick-start">Quick Start</a></h1>
+<h2 id="paper-trading-no-api-keys"><a class="header" href="#paper-trading-no-api-keys">Paper trading (no API keys)</a></h2>
+<p>The fastest way to run Mercury is in paper-trading mode against a live Binance feed:</p>
+<pre><code class="language-bash">cargo run --bin mercury -- run \
+  --symbol BTCUSDT \
+  --paper \
+  --strategy market_maker
+</code></pre>
+<p>Mercury will connect to the Binance WebSocket, receive live order-book updates, and simulate order matching with a 5 ms round-trip latency. No real orders are placed.</p>
+<h2 id="live-trading"><a class="header" href="#live-trading">Live trading</a></h2>
+<p>Set your exchange credentials as environment variables, then pass them at run time:</p>
+<pre><code class="language-bash">export BINANCE_API_KEY=your_key
+export BINANCE_SECRET_KEY=your_secret
+
+cargo run --bin mercury -- run \
+  --symbol BTCUSDT \
+  --strategy rsi
+</code></pre>
+<h2 id="tui-monitor"><a class="header" href="#tui-monitor">TUI monitor</a></h2>
+<p>In a second terminal, start the dashboard:</p>
+<pre><code class="language-bash">cargo run --bin mercury-tui
+</code></pre>
+<p>The TUI connects to Mercury via a Unix socket at <code>/tmp/mercury.sock</code> and displays live order-book depth, fills, PnL, and latency percentiles.</p>
+<h2 id="adjust-log-verbosity"><a class="header" href="#adjust-log-verbosity">Adjust log verbosity</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury -- --log-level debug run --symbol BTCUSDT --paper --strategy rsi
+</code></pre>
+<p>Valid levels: <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="configuration"><a class="header" href="#configuration">Configuration</a></h1>
+<p>Mercury is configured primarily through CLI flags. There is no config file required for basic operation.</p>
+<h2 id="cli-flags"><a class="header" href="#cli-flags">CLI flags</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Flag</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>--symbol</code></td><td>—</td><td>Trading symbol, e.g. <code>BTCUSDT</code> or <code>AAPL</code></td></tr>
+<tr><td><code>--exchange</code></td><td><code>binance</code></td><td>Exchange: <code>binance</code>, <code>coinbase</code>, <code>yahoo</code></td></tr>
+<tr><td><code>--strategy</code></td><td>—</td><td>Strategy name: <code>market_maker</code>, <code>rsi</code>, <code>momentum</code>, <code>arbitrage</code></td></tr>
+<tr><td><code>--paper</code></td><td>false</td><td>Enable paper trading via <code>PaperGateway</code></td></tr>
+<tr><td><code>--log-level</code></td><td><code>info</code></td><td>Tracing log level</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="environment-variables"><a class="header" href="#environment-variables">Environment variables</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variable</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>BINANCE_API_KEY</code></td><td>Binance REST/WS API key</td></tr>
+<tr><td><code>BINANCE_SECRET_KEY</code></td><td>Binance HMAC secret</td></tr>
+<tr><td><code>COINBASE_API_KEY</code></td><td>Coinbase Advanced Trade key</td></tr>
+<tr><td><code>COINBASE_SECRET_KEY</code></td><td>Coinbase secret</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="storage"><a class="header" href="#storage">Storage</a></h2>
+<p>Mercury writes its SQLite database to <code>mercury.db</code> in the current working directory. Override with <code>--db-path</code>:</p>
+<pre><code class="language-bash">cargo run --bin mercury -- run --symbol BTCUSDT --paper --strategy rsi --db-path /tmp/mercury.db
+</code></pre>
+<p>Use <code>:memory:</code> for ephemeral in-process storage (useful in tests).</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
+<p>Mercury is an event-driven trading engine. All inter-component communication flows through a single <code>EventBus</code> — a crossbeam bounded channel with a default capacity of 100,000 events.</p>
+<h2 id="event-flow"><a class="header" href="#event-flow">Event flow</a></h2>
+<pre><code>Market Feeds (WebSocket) → FeedManager → EventBus
+                                              │
+             ┌────────────────────────────────┼──────────────────┐
+             ▼                                ▼                  ▼
+      StrategyRunner                    OrderManager         StorageManager
+      (on_book/on_trade)               (submits orders       (persists fills
+             │                          via Gateway)          to SQLite)
+             ▼                                │
+         Signal events                    Fill events
+         → EventBus                       → EventBus
+                                              │
+                                         IpcServer
+                                    (/tmp/mercury.sock)
+                                    (broadcasts to TUI)
+</code></pre>
+<h2 id="key-traits"><a class="header" href="#key-traits">Key traits</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Trait</th><th>Crate</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Strategy</code></td><td><code>mercury-strategy</code></td><td>Implement for new trading strategies. Methods: <code>on_book</code>, <code>on_trade</code>, <code>on_fill</code>, <code>reset</code>.</td></tr>
+<tr><td><code>ExchangeGateway</code></td><td><code>mercury-gateway</code></td><td>Implement for new exchanges. Async: <code>submit_order</code>, <code>cancel_order</code>, <code>connect</code>.</td></tr>
+<tr><td><code>FeedParser</code></td><td><code>mercury-market</code></td><td>Implement for new exchange WebSocket feeds. Methods: <code>parse</code>, <code>ws_url</code>, <code>subscribe_message</code>.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="component-lifecycle"><a class="header" href="#component-lifecycle">Component lifecycle</a></h2>
+<p>Each long-running component is spawned as a <code>tokio::spawn</code> task:</p>
+<ol>
+<li><strong>FeedManager</strong> — opens WebSocket connections, parses messages, publishes <code>BookUpdate</code> and <code>Trade</code> events.</li>
+<li><strong>StrategyRunner</strong> — subscribes to market events, calls strategy methods, publishes <code>Signal</code> events.</li>
+<li><strong>OrderManager</strong> — subscribes to <code>Signal</code> events, applies risk checks, submits orders via the gateway.</li>
+<li><strong>StorageManager</strong> — subscribes to <code>Fill</code> events and persists them to SQLite.</li>
+<li><strong>IpcServer</strong> — fans out events to connected TUI clients over a Unix socket.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="event-bus"><a class="header" href="#event-bus">Event Bus</a></h1>
+<p>The <code>EventBus</code> is the central nervous system of Mercury. It is a thin wrapper around a crossbeam bounded channel.</p>
+<h2 id="design"><a class="header" href="#design">Design</a></h2>
+<ul>
+<li><strong>Capacity</strong>: 100,000 events (configurable at construction).</li>
+<li><strong>Back-pressure</strong>: producers block when the channel is full, providing natural flow control.</li>
+<li><strong>Lock-free</strong>: no mutex on the hot path — crossbeam’s channel uses atomic operations internally.</li>
+<li><strong>Single channel</strong>: all event types share one channel. Components filter by <code>EventPayload</code> variant.</li>
+</ul>
+<h2 id="event-types-eventpayload"><a class="header" href="#event-types-eventpayload">Event types (<code>EventPayload</code>)</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Variant</th><th>Published by</th><th>Consumed by</th></tr>
+</thead>
+<tbody>
+<tr><td><code>BookUpdate(Arc&lt;BookUpdate&gt;)</code></td><td>FeedManager</td><td>StrategyRunner, PaperGateway</td></tr>
+<tr><td><code>Trade(Trade)</code></td><td>FeedManager</td><td>StrategyRunner</td></tr>
+<tr><td><code>Signal(Signal)</code></td><td>StrategyRunner</td><td>OrderManager</td></tr>
+<tr><td><code>Fill(Fill)</code></td><td>OrderManager</td><td>StorageManager, StrategyRunner, IpcServer</td></tr>
+<tr><td><code>OrderUpdate(Order)</code></td><td>OrderManager</td><td>IpcServer</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="arc-wrapping"><a class="header" href="#arc-wrapping">Arc wrapping</a></h2>
+<p><code>BookUpdate</code> is wrapped in <code>Arc</code> before publishing so that multiple subscribers can hold a reference to the same allocation without copying the order-book snapshot.</p>
+<h2 id="usage"><a class="header" href="#usage">Usage</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Publish
+bus.publish(EventPayload::Signal(signal));
+
+// Subscribe (returns a Receiver)
+let rx = bus.subscribe();
+while let Ok(event) = rx.recv() {
+    match event.payload {
+        EventPayload::Fill(fill) =&gt; { /* handle */ }
+        _ =&gt; {}
+    }
+}
+<span class="boring">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="crate-structure"><a class="header" href="#crate-structure">Crate Structure</a></h1>
+<p>Mercury is a Cargo workspace. Crates are ordered by dependency depth.</p>
+<h2 id="dependency-order"><a class="header" href="#dependency-order">Dependency order</a></h2>
+<pre><code>core ← market, gateway, strategy, risk, execution, replay, metrics, storage ← cli, tui
+</code></pre>
+<h2 id="crate-descriptions"><a class="header" href="#crate-descriptions">Crate descriptions</a></h2>
+<h3 id="mercury-core"><a class="header" href="#mercury-core"><code>mercury-core</code></a></h3>
+<p>Shared types and infrastructure used by every other crate.</p>
+<ul>
+<li><code>Event</code>, <code>EventBus</code>, <code>EventPayload</code></li>
+<li><code>OrderBook</code>, <code>BookUpdate</code>, <code>Trade</code></li>
+<li><code>Pool</code> (object pool backed by <code>parking_lot</code>)</li>
+<li><code>IpcServer</code> (Unix socket broadcaster)</li>
+<li>All domain types: <code>Symbol</code>, <code>Exchange</code>, <code>Side</code>, <code>Order</code>, <code>Fill</code>, <code>Signal</code>, <code>OrderId</code>, <code>TimeInForce</code>, <code>FixedPoint</code></li>
+</ul>
+<h3 id="mercury-market"><a class="header" href="#mercury-market"><code>mercury-market</code></a></h3>
+<p>Market data ingestion.</p>
+<ul>
+<li><code>FeedManager</code> — manages WebSocket connections and reconnect logic</li>
+<li><code>BinanceParser</code>, <code>CoinbaseParser</code> — implement <code>FeedParser</code></li>
+<li><code>YahooFeed</code> — HTTP polling feed for equities</li>
+<li><code>BookBuilder</code> — reconstructs a full order book from incremental updates</li>
+</ul>
+<h3 id="mercury-gateway"><a class="header" href="#mercury-gateway"><code>mercury-gateway</code></a></h3>
+<p>Exchange connectivity for order submission.</p>
+<ul>
+<li><code>BinanceGateway</code>, <code>CoinbaseGateway</code>, <code>BybitGateway</code>, <code>KrakenGateway</code>, <code>OkxGateway</code></li>
+<li><code>PaperGateway</code> — local matching engine, configurable RTT latency</li>
+<li>All implement <code>ExchangeGateway</code></li>
+</ul>
+<h3 id="mercury-strategy"><a class="header" href="#mercury-strategy"><code>mercury-strategy</code></a></h3>
+<p>Strategy implementations and technical indicators.</p>
+<ul>
+<li><code>StrategyRunner</code> — dispatches events to strategies</li>
+<li>Strategies: <code>MarketMaker</code>, <code>Momentum</code>, <code>RsiStrategy</code>, <code>ArbitrageStrategy</code>, <code>InferenceStrategy</code></li>
+<li>Indicators: <code>SMA</code>, <code>EMA</code>, <code>RSI</code>, <code>MACD</code></li>
+</ul>
+<h3 id="mercury-risk"><a class="header" href="#mercury-risk"><code>mercury-risk</code></a></h3>
+<p>Pre-trade risk checks.</p>
+<ul>
+<li><code>RiskManager</code> — position limits, daily loss guard, per-order rate limiting, kill switch</li>
+</ul>
+<h3 id="mercury-execution"><a class="header" href="#mercury-execution"><code>mercury-execution</code></a></h3>
+<p>Order lifecycle management.</p>
+<ul>
+<li><code>OrderManager</code> — wraps gateway with risk checks, tracks open orders</li>
+<li><code>SimulatedExchange</code> — for backtesting</li>
+<li><code>SmartOrderRouter</code> — best-execution routing across venues</li>
+<li><code>ExecutionMetrics</code></li>
+</ul>
+<h3 id="mercury-replay"><a class="header" href="#mercury-replay"><code>mercury-replay</code></a></h3>
+<p>Data recording and deterministic replay.</p>
+<ul>
+<li><code>Recorder</code> — writes tick data to Parquet files</li>
+<li><code>Player</code> — replays a Parquet file at configurable speed</li>
+</ul>
+<h3 id="mercury-metrics"><a class="header" href="#mercury-metrics"><code>mercury-metrics</code></a></h3>
+<p>Observability.</p>
+<ul>
+<li><code>LatencyTracker</code> — HDR histograms for fill-to-ack, event-to-signal</li>
+<li><code>PnlTracker</code> — realized and unrealized PnL</li>
+<li>Prometheus export endpoint</li>
+</ul>
+<h3 id="mercury-storage"><a class="header" href="#mercury-storage"><code>mercury-storage</code></a></h3>
+<p>Persistence.</p>
+<ul>
+<li><code>StorageManager</code> — SQLite via sqlx, persists <code>Fill</code> events to a <code>trades</code> table</li>
+<li>Migrations in <code>crates/storage/migrations/</code></li>
+</ul>
+<h3 id="mercury-cli-binary-mercury"><a class="header" href="#mercury-cli-binary-mercury"><code>mercury-cli</code> (binary: <code>mercury</code>)</a></h3>
+<p>Top-level binary with subcommands: <code>run</code>, <code>replay</code>, <code>backtest</code>, <code>record</code>.</p>
+<h3 id="mercury-tui-binary-mercury-tui"><a class="header" href="#mercury-tui-binary-mercury-tui"><code>mercury-tui</code> (binary: <code>mercury-tui</code>)</a></h3>
+<p>Real-time ratatui dashboard. Connects to <code>mercury</code> via <code>/tmp/mercury.sock</code>.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="concurrency-model"><a class="header" href="#concurrency-model">Concurrency Model</a></h1>
+<h2 id="hot-path-is-lock-free"><a class="header" href="#hot-path-is-lock-free">Hot path is lock-free</a></h2>
+<ul>
+<li><code>EventBus</code> uses crossbeam bounded channels — no mutex on publish/receive.</li>
+<li><code>Pool</code> uses <code>parking_lot::Mutex</code>, which is fair and low-overhead.</li>
+<li><code>Symbol</code> is a <code>[u8; 16]</code> stack array — no heap allocation on the critical path.</li>
+</ul>
+<h2 id="task-topology"><a class="header" href="#task-topology">Task topology</a></h2>
+<p>Each long-running component runs as an independent <code>tokio::spawn</code> task:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Task</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>FeedManager</td><td>One task per exchange connection. Handles WebSocket reconnection.</td></tr>
+<tr><td>StrategyRunner</td><td>Single-threaded. Owns all strategy instances. Calls <code>on_book</code>/<code>on_trade</code> synchronously.</td></tr>
+<tr><td>OrderManager</td><td>Awaits signals; submits orders to the gateway asynchronously.</td></tr>
+<tr><td>StorageManager</td><td>Batches fill writes to SQLite.</td></tr>
+<tr><td>IpcServer</td><td>Fans out to connected TUI clients. Non-blocking; slow clients are dropped.</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="strategy-thread-safety"><a class="header" href="#strategy-thread-safety">Strategy thread safety</a></h2>
+<p><code>Strategy</code> is <code>Send + Sync</code>, but <code>on_book</code> and <code>on_trade</code> take <code>&amp;mut self</code>. <code>StrategyRunner</code> owns the strategies and calls them from a single Tokio task — no concurrent mutation, no locking needed inside strategy implementations.</p>
+<h2 id="back-pressure"><a class="header" href="#back-pressure">Back-pressure</a></h2>
+<p>The <code>EventBus</code> channel has a bounded capacity (default 100,000). If a slow consumer (e.g. StorageManager during a disk flush) falls behind, producers will block. This prevents unbounded memory growth but means the market feed task may stall. Size the channel according to your expected burst rate.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="data-types"><a class="header" href="#data-types">Data Types</a></h1>
+<h2 id="decimal-arithmetic"><a class="header" href="#decimal-arithmetic">Decimal arithmetic</a></h2>
+<p>All prices and quantities use <code>rust_decimal::Decimal</code>. Never use <code>f64</code> for financial values — floating-point rounding errors compound over time and can cause incorrect P&amp;L calculations.</p>
+<p>Use the <code>dec!()</code> macro for literals:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use rust_decimal_macros::dec;
+
+let price = dec!(42_150.50);
+let qty   = dec!(0.001);
+let notional = price * qty; // Decimal, exact
+<span class="boring">}</span></code></pre>
+<h2 id="symbol"><a class="header" href="#symbol">Symbol</a></h2>
+<p><code>Symbol</code> is a fixed-size <code>[u8; 16]</code> stack array. This avoids heap allocation on the hot path.</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let sym: Symbol = Symbol::new("BTCUSDT");
+let sym: Symbol = "BTCUSDT".into(); // same thing
+<span class="boring">}</span></code></pre>
+<p>Strings longer than 16 bytes are silently truncated. Keep symbol names short.</p>
+<h2 id="order"><a class="header" href="#order">Order</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Order {
+    pub id:            OrderId,
+    pub symbol:        Symbol,
+    pub exchange:      Exchange,
+    pub side:          Side,        // Bid | Ask
+    pub order_type:    OrderType,   // Limit | Market | PostOnly
+    pub price:         Decimal,
+    pub quantity:      Decimal,
+    pub time_in_force: TimeInForce, // GTC | IOC | FOK | PostOnly
+}
+<span class="boring">}</span></code></pre>
+<h2 id="fill"><a class="header" href="#fill">Fill</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Fill {
+    pub order_id:   OrderId,
+    pub symbol:     Symbol,
+    pub exchange:   Exchange,
+    pub side:       Side,
+    pub price:      Decimal,
+    pub quantity:   Decimal,
+    pub fee:        Decimal,
+    pub timestamp:  i64,  // Unix millis
+}
+<span class="boring">}</span></code></pre>
+<h2 id="signal"><a class="header" href="#signal">Signal</a></h2>
+<p>Strategies emit <code>Signal</code> values that the <code>OrderManager</code> converts into orders:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Signal {
+    pub symbol:    Symbol,
+    pub side:      Side,
+    pub price:     Decimal,
+    pub quantity:  Decimal,
+    pub strategy:  &amp;'static str,
+}
+<span class="boring">}</span></code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="market-feeds"><a class="header" href="#market-feeds">Market Feeds</a></h1>
+<p>The <code>mercury-market</code> crate manages all inbound market data.</p>
+<h2 id="feedmanager"><a class="header" href="#feedmanager">FeedManager</a></h2>
+<p><code>FeedManager</code> owns one or more WebSocket connections and routes parsed messages onto the <code>EventBus</code>. It handles reconnection automatically on disconnect.</p>
+<h2 id="implementing-a-new-feed"><a class="header" href="#implementing-a-new-feed">Implementing a new feed</a></h2>
+<p>Implement the <code>FeedParser</code> trait:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait FeedParser: Send + Sync {
+    /// Return the WebSocket URL for this exchange/symbol.
+    fn ws_url(&amp;self, symbol: &amp;Symbol) -&gt; String;
+
+    /// Return the JSON subscription message to send after connecting.
+    fn subscribe_message(&amp;self, symbol: &amp;Symbol) -&gt; String;
+
+    /// Parse a raw WebSocket message into zero or more events.
+    fn parse(&amp;self, msg: &amp;str) -&gt; Vec&lt;EventPayload&gt;;
+}
+<span class="boring">}</span></code></pre>
+<p>Once implemented, register your parser with <code>FeedManager::add_feed</code>.</p>
+<h2 id="supported-feeds"><a class="header" href="#supported-feeds">Supported feeds</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parser</th><th>Exchange</th><th>Data</th></tr>
+</thead>
+<tbody>
+<tr><td><code>BinanceParser</code></td><td>Binance</td><td>Order book depth (L2), trades</td></tr>
+<tr><td><code>CoinbaseParser</code></td><td>Coinbase</td><td>Order book depth (L2), trades</td></tr>
+<tr><td><code>YahooFeed</code></td><td>Yahoo Finance</td><td>OHLCV bars (HTTP polling)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="bookbuilder"><a class="header" href="#bookbuilder">BookBuilder</a></h2>
+<p><code>BookBuilder</code> maintains a full L2 order book from incremental <code>BookUpdate</code> events. It applies sequence-numbered deltas and publishes a fresh <code>Arc&lt;BookUpdate&gt;</code> snapshot after each delta is applied.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gateways"><a class="header" href="#gateways">Gateways</a></h1>
+<p>Gateways implement the <code>ExchangeGateway</code> trait and handle order submission to exchanges.</p>
+<h2 id="exchangegateway-trait"><a class="header" href="#exchangegateway-trait">ExchangeGateway trait</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ExchangeGateway: Send + Sync {
+    async fn connect(&amp;mut self) -&gt; GatewayResult&lt;()&gt;;
+    async fn submit_order(&amp;self, order: &amp;Order) -&gt; GatewayResult&lt;OrderId&gt;;
+    async fn cancel_order(&amp;self, id: &amp;OrderId, symbol: &amp;Symbol) -&gt; GatewayResult&lt;()&gt;;
+    fn exchange(&amp;self) -&gt; Exchange;
+}
+<span class="boring">}</span></code></pre>
+<h2 id="supported-gateways"><a class="header" href="#supported-gateways">Supported gateways</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Gateway</th><th>Exchange</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td><code>BinanceGateway</code></td><td>Binance Spot</td><td>HMAC-SHA256 signing</td></tr>
+<tr><td><code>CoinbaseGateway</code></td><td>Coinbase Advanced Trade</td><td>HMAC-SHA256 signing</td></tr>
+<tr><td><code>BybitGateway</code></td><td>Bybit v5</td><td>HMAC-SHA256 signing</td></tr>
+<tr><td><code>KrakenGateway</code></td><td>Kraken v0</td><td>HMAC-SHA512 with nonce</td></tr>
+<tr><td><code>OkxGateway</code></td><td>OKX v5</td><td>HMAC-SHA256, base64</td></tr>
+<tr><td><code>PaperGateway</code></td><td>—</td><td>Local simulated matching</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="papergateway"><a class="header" href="#papergateway">PaperGateway</a></h2>
+<p><code>PaperGateway</code> is a local matching engine that simulates order fills against live <code>BookUpdate</code> events on the bus. It is the recommended way to develop and test strategies.</p>
+<ul>
+<li>Default simulated RTT: <strong>5 ms</strong></li>
+<li>No API keys required</li>
+<li>Enabled with <code>--paper</code> CLI flag</li>
+</ul>
+<p>Configurable latency:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>PaperGateway::with_latency(Duration::from_millis(10))
+<span class="boring">}</span></code></pre>
+<h2 id="adding-a-new-gateway"><a class="header" href="#adding-a-new-gateway">Adding a new gateway</a></h2>
+<ol>
+<li>Create <code>crates/gateway/src/myexchange.rs</code></li>
+<li>Implement <code>ExchangeGateway</code></li>
+<li>Add the variant to <code>Exchange</code> enum in <code>mercury-core</code></li>
+<li>Register in <code>crates/cli/src/run.rs</code></li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="order-manager"><a class="header" href="#order-manager">Order Manager</a></h1>
+<p><code>OrderManager</code> sits between strategies and the exchange gateway. It applies risk checks before forwarding orders and tracks their lifecycle.</p>
+<h2 id="responsibilities"><a class="header" href="#responsibilities">Responsibilities</a></h2>
+<ol>
+<li>Receive <code>Signal</code> events from the <code>EventBus</code>.</li>
+<li>Convert signals to <code>Order</code> values.</li>
+<li>Call <code>RiskManager::check</code> — reject orders that breach limits.</li>
+<li>Submit approved orders via <code>ExchangeGateway::submit_order</code>.</li>
+<li>Track open orders by <code>OrderId</code>.</li>
+<li>Publish <code>Fill</code> events back onto the <code>EventBus</code> when acknowledgements arrive.</li>
+</ol>
+<h2 id="smart-order-routing"><a class="header" href="#smart-order-routing">Smart order routing</a></h2>
+<p><code>SmartOrderRouter</code> wraps multiple gateways and selects the venue with the best available price for the given symbol and side. It is opt-in; the default configuration uses a single gateway.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="risk-manager"><a class="header" href="#risk-manager">Risk Manager</a></h1>
+<p><code>RiskManager</code> enforces pre-trade risk controls. Every order passes through it before reaching the gateway.</p>
+<h2 id="checks"><a class="header" href="#checks">Checks</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Check</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>Position limit</td><td>Rejects orders that would exceed the configured max position size</td></tr>
+<tr><td>Daily loss guard</td><td>Halts trading when realized + unrealized loss exceeds the daily limit</td></tr>
+<tr><td>Rate limit</td><td>Enforces a maximum number of orders per second</td></tr>
+<tr><td>Kill switch</td><td>Immediately blocks all new orders; drains open orders via cancel</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="configuration-1"><a class="header" href="#configuration-1">Configuration</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>RiskConfig {
+    max_position:    dec!(1.0),      // max open qty per symbol
+    daily_loss_limit: dec!(500.0),   // USD
+    max_orders_per_sec: 10,
+}
+<span class="boring">}</span></code></pre>
+<h2 id="kill-switch"><a class="header" href="#kill-switch">Kill switch</a></h2>
+<p>Activate programmatically:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>risk_manager.kill();
+<span class="boring">}</span></code></pre>
+<p>Or via the TUI with the <code>K</code> keybinding. Once triggered, the engine stops submitting new orders and attempts to cancel all open positions.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="storage-1"><a class="header" href="#storage-1">Storage</a></h1>
+<p><code>StorageManager</code> persists <code>Fill</code> events to a SQLite database using sqlx.</p>
+<h2 id="schema"><a class="header" href="#schema">Schema</a></h2>
+<p>Migrations live in <code>crates/storage/migrations/</code>. The current schema has one table:</p>
+<pre><code class="language-sql">CREATE TABLE trades (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id    TEXT    NOT NULL,
+    symbol      TEXT    NOT NULL,
+    exchange    TEXT    NOT NULL,
+    side        TEXT    NOT NULL,  -- 'buy' | 'sell'
+    price       TEXT    NOT NULL,  -- stored as decimal string
+    quantity    TEXT    NOT NULL,
+    fee         TEXT    NOT NULL,
+    timestamp   INTEGER NOT NULL   -- Unix millis
+);
+</code></pre>
+<p>Prices and quantities are stored as decimal strings to preserve exact precision.</p>
+<h2 id="configuration-2"><a class="header" href="#configuration-2">Configuration</a></h2>
+<p>Default database path: <code>mercury.db</code> in the working directory.</p>
+<p>Use <code>:memory:</code> for tests:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>StorageManager::new(":memory:").await?;
+<span class="boring">}</span></code></pre>
+<h2 id="adding-new-tables"><a class="header" href="#adding-new-tables">Adding new tables</a></h2>
+<ol>
+<li>Create a new migration file in <code>crates/storage/migrations/</code> following the <code>NNNN_description.sql</code> naming convention.</li>
+<li>sqlx applies migrations automatically on <code>StorageManager</code> startup.</li>
+</ol>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="replay--recorder"><a class="header" href="#replay--recorder">Replay &amp; Recorder</a></h1>
+<p>The <code>mercury-replay</code> crate provides tools for recording live market data and replaying it deterministically.</p>
+<h2 id="recorder"><a class="header" href="#recorder">Recorder</a></h2>
+<p><code>Recorder</code> subscribes to <code>BookUpdate</code> and <code>Trade</code> events on the bus and writes them to a Parquet file.</p>
+<pre><code class="language-bash"># Record 120 seconds of BTCUSDT tick data
+cargo run --bin mercury -- record \
+  --symbol BTCUSDT \
+  --output data.parquet \
+  --duration 120
+</code></pre>
+<p>Default duration is 60 seconds. The output file can be replayed or used for backtesting.</p>
+<h2 id="player"><a class="header" href="#player">Player</a></h2>
+<p><code>Player</code> reads a Parquet file and replays events onto the <code>EventBus</code> at a configurable speed multiplier.</p>
+<pre><code class="language-bash"># Replay at real-time speed
+cargo run --bin mercury -- replay --file data.parquet --speed 1.0
+
+# Replay at 10x speed
+cargo run --bin mercury -- replay --file data.parquet --speed 10.0
+</code></pre>
+<h2 id="backtest"><a class="header" href="#backtest">Backtest</a></h2>
+<p>The <code>backtest</code> subcommand combines <code>Player</code> with a <code>SimulatedExchange</code> to run a strategy over historical data and report PnL:</p>
+<pre><code class="language-bash">cargo run --bin mercury -- backtest \
+  --file data.parquet \
+  --strategy market_maker
+</code></pre>
+<p>Results are printed to stdout and written to <code>backtest_results.json</code>.</p>
+<h2 id="parquet-schema"><a class="header" href="#parquet-schema">Parquet schema</a></h2>
+<p>Each row represents one tick:</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>timestamp</code></td><td><code>INT64</code></td><td>Unix millis</td></tr>
+<tr><td><code>symbol</code></td><td><code>BYTE_ARRAY</code></td><td>Trading symbol</td></tr>
+<tr><td><code>bid_price</code></td><td><code>BYTE_ARRAY</code></td><td>Best bid (decimal string)</td></tr>
+<tr><td><code>ask_price</code></td><td><code>BYTE_ARRAY</code></td><td>Best ask (decimal string)</td></tr>
+<tr><td><code>bid_qty</code></td><td><code>BYTE_ARRAY</code></td><td>Best bid quantity</td></tr>
+<tr><td><code>ask_qty</code></td><td><code>BYTE_ARRAY</code></td><td>Best ask quantity</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="metrics"><a class="header" href="#metrics">Metrics</a></h1>
+<p><code>mercury-metrics</code> provides latency histograms, PnL tracking, and a Prometheus export endpoint.</p>
+<h2 id="latencytracker"><a class="header" href="#latencytracker">LatencyTracker</a></h2>
+<p>Uses HDR histograms (via <code>hdrhistogram</code>) to record latency with microsecond precision across several orders of magnitude.</p>
+<p>Key measurements:</p>
+<ul>
+<li><strong>Feed-to-strategy</strong>: time from <code>BookUpdate</code> publish to <code>on_book</code> return</li>
+<li><strong>Signal-to-submit</strong>: time from <code>Signal</code> publish to <code>submit_order</code> call</li>
+<li><strong>Submit-to-fill</strong>: exchange round-trip time</li>
+</ul>
+<p>Access percentiles:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let p99 = tracker.percentile(99.0); // nanoseconds
+let p999 = tracker.percentile(99.9);
+<span class="boring">}</span></code></pre>
+<h2 id="pnltracker"><a class="header" href="#pnltracker">PnlTracker</a></h2>
+<p>Tracks realized and unrealized PnL per symbol:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>tracker.on_fill(&amp;fill);
+let pnl = tracker.unrealized_pnl(&amp;symbol, current_mid_price);
+<span class="boring">}</span></code></pre>
+<h2 id="prometheus"><a class="header" href="#prometheus">Prometheus</a></h2>
+<p>Metrics are exported on <code>0.0.0.0:9090/metrics</code> when <code>--metrics</code> is passed. Compatible with any Prometheus scrape target.</p>
+<p>Available metrics:</p>
+<ul>
+<li><code>mercury_fill_latency_ns</code> — histogram</li>
+<li><code>mercury_pnl_realized_usd</code> — gauge per symbol</li>
+<li><code>mercury_orders_submitted_total</code> — counter</li>
+<li><code>mercury_orders_cancelled_total</code> — counter</li>
+<li><code>mercury_risk_rejections_total</code> — counter</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="tui-monitor-1"><a class="header" href="#tui-monitor-1">TUI Monitor</a></h1>
+<p><code>mercury-tui</code> is a standalone binary that connects to a running <code>mercury</code> process via a Unix socket and displays a real-time dashboard.</p>
+<h2 id="starting-the-tui"><a class="header" href="#starting-the-tui">Starting the TUI</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury-tui
+</code></pre>
+<p>The TUI connects to <code>/tmp/mercury.sock</code>. Start <code>mercury</code> first.</p>
+<h2 id="dashboard-panels"><a class="header" href="#dashboard-panels">Dashboard panels</a></h2>
+<ul>
+<li><strong>Order book</strong> — live L2 depth, colour-coded bid/ask</li>
+<li><strong>Fills</strong> — scrolling list of recent fills with price, quantity, and exchange</li>
+<li><strong>PnL</strong> — realized and unrealized PnL per symbol</li>
+<li><strong>Latency</strong> — p50/p99/p999 for feed-to-signal and signal-to-fill</li>
+<li><strong>Orders</strong> — open order list with status</li>
+</ul>
+<h2 id="keybindings"><a class="header" href="#keybindings">Keybindings</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Key</th><th>Action</th></tr>
+</thead>
+<tbody>
+<tr><td><code>q</code></td><td>Quit</td></tr>
+<tr><td><code>K</code></td><td>Activate kill switch (cancel all, halt trading)</td></tr>
+<tr><td><code>↑/↓</code></td><td>Scroll fills / order list</td></tr>
+<tr><td><code>Tab</code></td><td>Switch panel focus</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="ipc-protocol"><a class="header" href="#ipc-protocol">IPC protocol</a></h2>
+<p><code>mercury</code> broadcasts JSON-encoded <code>Event</code> values over <code>/tmp/mercury.sock</code>. The TUI deserializes them and updates its state. Multiple TUI instances can connect simultaneously.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="strategies-overview"><a class="header" href="#strategies-overview">Strategies Overview</a></h1>
+<p>Strategies implement the <code>Strategy</code> trait and are driven by the <code>StrategyRunner</code>.</p>
+<h2 id="strategy-trait"><a class="header" href="#strategy-trait">Strategy trait</a></h2>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait Strategy: Send + Sync {
+    fn on_book(&amp;mut self, book: &amp;Arc&lt;BookUpdate&gt;) -&gt; Vec&lt;Signal&gt;;
+    fn on_trade(&amp;mut self, trade: &amp;Trade) -&gt; Vec&lt;Signal&gt;;
+    fn on_fill(&amp;mut self, fill: &amp;Fill);
+    fn reset(&amp;mut self);
+    fn name(&amp;self) -&gt; &amp;'static str;
+}
+<span class="boring">}</span></code></pre>
+<ul>
+<li><code>on_book</code> — called on every order-book snapshot; return signals to trade.</li>
+<li><code>on_trade</code> — called on every tape print.</li>
+<li><code>on_fill</code> — called when one of this strategy’s orders is filled; use to update inventory.</li>
+<li><code>reset</code> — clear all state (used before backtests and replays).</li>
+</ul>
+<h2 id="built-in-strategies"><a class="header" href="#built-in-strategies">Built-in strategies</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Name</th><th>Flag</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>MarketMaker</code></td><td><code>market_maker</code></td><td>Symmetric quotes around mid with inventory skew</td></tr>
+<tr><td><code>Momentum</code></td><td><code>momentum</code></td><td>Trend-following using EMA crossover</td></tr>
+<tr><td><code>RsiStrategy</code></td><td><code>rsi</code></td><td>Mean-reversion using RSI overbought/oversold</td></tr>
+<tr><td><code>ArbitrageStrategy</code></td><td><code>arbitrage</code></td><td>Cross-exchange price discrepancy</td></tr>
+<tr><td><code>InferenceStrategy</code></td><td><code>inference</code></td><td>ONNX model inference</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="technical-indicators"><a class="header" href="#technical-indicators">Technical indicators</a></h2>
+<p>All indicators live in <code>mercury-strategy</code> and operate on <code>Decimal</code> values:</p>
+<ul>
+<li><code>SMA(period)</code> — simple moving average</li>
+<li><code>EMA(period)</code> — exponential moving average</li>
+<li><code>RSI(period)</code> — relative strength index</li>
+<li><code>MACD(fast, slow, signal)</code> — moving average convergence/divergence</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="market-maker"><a class="header" href="#market-maker">Market Maker</a></h1>
+<p><code>MarketMaker</code> posts symmetric limit orders on both sides of the mid-price and adjusts quotes on every book update.</p>
+<h2 id="algorithm"><a class="header" href="#algorithm">Algorithm</a></h2>
+<ol>
+<li>Compute <code>mid = (best_bid + best_ask) / 2</code>.</li>
+<li>Apply inventory skew: if long, widen the ask and tighten the bid to mean-revert.</li>
+<li>Place a bid at <code>mid - spread/2</code> and an ask at <code>mid + spread/2</code>.</li>
+<li>On the next book update, cancel stale quotes and replace with fresh ones (peg mode reduces churn by only replacing when price moves beyond a threshold).</li>
+</ol>
+<h2 id="parameters"><a class="header" href="#parameters">Parameters</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>spread</code></td><td><code>dec!(0.002)</code></td><td>Total spread as a fraction of mid</td></tr>
+<tr><td><code>order_qty</code></td><td><code>dec!(0.01)</code></td><td>Order size in base currency</td></tr>
+<tr><td><code>inventory_skew</code></td><td><code>dec!(0.5)</code></td><td>Multiplier for inventory-based skew</td></tr>
+<tr><td><code>peg_threshold</code></td><td><code>dec!(0.0005)</code></td><td>Min price move before requoting (peg mode)</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="peg-mode"><a class="header" href="#peg-mode">Peg mode</a></h2>
+<p>Peg mode (enabled by default) avoids unnecessary cancel/replace cycles. A quote is only refreshed when the mid-price moves more than <code>peg_threshold</code> from the last quoted price. This reduces exchange fees and order rate usage.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="momentum"><a class="header" href="#momentum">Momentum</a></h1>
+<p><code>Momentum</code> is a trend-following strategy that uses an EMA crossover to generate directional signals.</p>
+<h2 id="algorithm-1"><a class="header" href="#algorithm-1">Algorithm</a></h2>
+<ol>
+<li>Maintain a fast EMA (default period 12) and a slow EMA (default period 26) over trade prices.</li>
+<li>When fast EMA crosses above slow EMA: emit a <strong>buy</strong> signal.</li>
+<li>When fast EMA crosses below slow EMA: emit a <strong>sell</strong> signal.</li>
+<li>No signal is emitted until both EMAs have warmed up (require <code>slow_period</code> trades).</li>
+</ol>
+<h2 id="parameters-1"><a class="header" href="#parameters-1">Parameters</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>fast_period</code></td><td><code>12</code></td><td>Fast EMA period</td></tr>
+<tr><td><code>slow_period</code></td><td><code>26</code></td><td>Slow EMA period</td></tr>
+<tr><td><code>order_qty</code></td><td><code>dec!(0.01)</code></td><td>Order size per signal</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="rsi-strategy"><a class="header" href="#rsi-strategy">RSI Strategy</a></h1>
+<p><code>RsiStrategy</code> is a mean-reversion strategy based on the Relative Strength Index.</p>
+<h2 id="algorithm-2"><a class="header" href="#algorithm-2">Algorithm</a></h2>
+<ol>
+<li>Compute RSI over the last <code>period</code> trade prices (default 14).</li>
+<li>When RSI drops below <code>oversold</code> (default 30): emit a <strong>buy</strong> signal.</li>
+<li>When RSI rises above <code>overbought</code> (default 70): emit a <strong>sell</strong> signal.</li>
+<li>No signal is emitted until the RSI has warmed up.</li>
+</ol>
+<h2 id="parameters-2"><a class="header" href="#parameters-2">Parameters</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>period</code></td><td><code>14</code></td><td>RSI lookback period</td></tr>
+<tr><td><code>oversold</code></td><td><code>30</code></td><td>RSI level that triggers a buy</td></tr>
+<tr><td><code>overbought</code></td><td><code>70</code></td><td>RSI level that triggers a sell</td></tr>
+<tr><td><code>order_qty</code></td><td><code>dec!(0.01)</code></td><td>Order size per signal</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="arbitrage-strategy"><a class="header" href="#arbitrage-strategy">Arbitrage Strategy</a></h1>
+<p><code>ArbitrageStrategy</code> monitors the same symbol across two exchanges and trades when the price discrepancy exceeds transaction costs.</p>
+<h2 id="algorithm-3"><a class="header" href="#algorithm-3">Algorithm</a></h2>
+<ol>
+<li>Maintain best bid/ask for the symbol on both exchanges.</li>
+<li>When <code>exchange_a.ask &lt; exchange_b.bid - threshold</code>: buy on A, sell on B.</li>
+<li>When <code>exchange_b.ask &lt; exchange_a.bid - threshold</code>: buy on B, sell on A.</li>
+<li>Block re-entry until both legs of the previous trade are filled.</li>
+</ol>
+<h2 id="parameters-3"><a class="header" href="#parameters-3">Parameters</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>min_spread</code></td><td><code>dec!(0.001)</code></td><td>Minimum price discrepancy to trade</td></tr>
+<tr><td><code>order_qty</code></td><td><code>dec!(0.01)</code></td><td>Order size per leg</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="notes"><a class="header" href="#notes">Notes</a></h2>
+<p>True cross-exchange arbitrage requires near-simultaneous execution on both venues. Network latency between exchanges will erode the opportunity. This strategy is most useful in paper-trading mode to study spread behaviour.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="ml-inference-strategy"><a class="header" href="#ml-inference-strategy">ML Inference Strategy</a></h1>
+<p><code>InferenceStrategy</code> runs a trained ONNX model to generate trade signals.</p>
+<h2 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h2>
+<ol>
+<li>On each <code>on_book</code> call, compute a feature vector from recent order-book snapshots (bid/ask spread, volume imbalance, mid-price returns, etc.).</li>
+<li>Pass the feature vector through the ONNX model via <code>tract-onnx</code>.</li>
+<li>Interpret the model output as a directional probability; emit buy/sell signals when the probability exceeds a threshold.</li>
+<li>Fall back to an online logistic regression model when no ONNX file is provided.</li>
+</ol>
+<h2 id="loading-a-model"><a class="header" href="#loading-a-model">Loading a model</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury -- run \
+  --symbol BTCUSDT \
+  --paper \
+  --strategy inference \
+  --model path/to/model.onnx
+</code></pre>
+<h2 id="online-learning"><a class="header" href="#online-learning">Online learning</a></h2>
+<p>When running without a pre-trained model, <code>InferenceStrategy</code> uses incremental logistic regression that updates its weights after each fill. This allows the strategy to adapt to changing market conditions without retraining.</p>
+<h2 id="feature-set"><a class="header" href="#feature-set">Feature set</a></h2>
+<ul>
+<li>Mid-price returns (last 10 ticks)</li>
+<li>Bid/ask spread</li>
+<li>Volume imbalance <code>(bid_qty - ask_qty) / (bid_qty + ask_qty)</code></li>
+<li>LOB volume profile (top 5 levels each side)</li>
+<li>Volatility estimate (Parkinson)</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="writing-a-custom-strategy"><a class="header" href="#writing-a-custom-strategy">Writing a Custom Strategy</a></h1>
+<h2 id="1-create-the-file"><a class="header" href="#1-create-the-file">1. Create the file</a></h2>
+<p>Add <code>crates/strategy/src/my_strategy.rs</code> and implement the <code>Strategy</code> trait:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use std::sync::Arc;
+use mercury_core::{BookUpdate, Fill, Signal, Trade};
+use crate::Strategy;
+
+pub struct MyStrategy {
+    // your state here
+}
+
+impl MyStrategy {
+    pub fn new() -&gt; Self {
+        Self {}
+    }
+}
+
+impl Strategy for MyStrategy {
+    fn name(&amp;self) -&gt; &amp;'static str { "my_strategy" }
+
+    fn on_book(&amp;mut self, book: &amp;Arc&lt;BookUpdate&gt;) -&gt; Vec&lt;Signal&gt; {
+        // compute signals from the order book
+        vec![]
+    }
+
+    fn on_trade(&amp;mut self, _trade: &amp;Trade) -&gt; Vec&lt;Signal&gt; {
+        vec![]
+    }
+
+    fn on_fill(&amp;mut self, _fill: &amp;Fill) {
+        // update inventory / reinforce learning
+    }
+
+    fn reset(&amp;mut self) {
+        // clear all state
+        *self = Self::new();
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="2-export-from-the-crate"><a class="header" href="#2-export-from-the-crate">2. Export from the crate</a></h2>
+<p>In <code>crates/strategy/src/lib.rs</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub mod my_strategy;
+pub use my_strategy::MyStrategy;
+<span class="boring">}</span></code></pre>
+<h2 id="3-register-the-cli-flag"><a class="header" href="#3-register-the-cli-flag">3. Register the CLI flag</a></h2>
+<p>In <code>crates/cli/src/run.rs</code>, add a match arm for the new strategy name:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>"my_strategy" =&gt; Box::new(MyStrategy::new()),
+<span class="boring">}</span></code></pre>
+<h2 id="4-run-it"><a class="header" href="#4-run-it">4. Run it</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury -- run --symbol BTCUSDT --paper --strategy my_strategy
+</code></pre>
+<h2 id="tips"><a class="header" href="#tips">Tips</a></h2>
+<ul>
+<li>Keep <code>on_book</code> fast — it is called on every tick. Avoid allocations on the hot path.</li>
+<li>Use <code>rust_decimal::Decimal</code> for all price/quantity arithmetic.</li>
+<li>Initialise warm-up state in <code>reset()</code> so backtests start clean.</li>
+<li>Use <code>on_fill</code> to track inventory rather than counting signals, since orders may be partially filled or rejected.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="paper-trading"><a class="header" href="#paper-trading">Paper Trading</a></h1>
+<p>Paper trading runs Mercury against a live market feed but routes all orders through <code>PaperGateway</code> — a local matching engine. No real money is at risk.</p>
+<h2 id="enable-paper-trading"><a class="header" href="#enable-paper-trading">Enable paper trading</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury -- run --symbol BTCUSDT --paper --strategy market_maker
+</code></pre>
+<h2 id="how-papergateway-works"><a class="header" href="#how-papergateway-works">How PaperGateway works</a></h2>
+<ol>
+<li>Receives live <code>BookUpdate</code> events from the market feed.</li>
+<li>When a new order arrives, checks whether it crosses the current best bid/ask.</li>
+<li>If it fills, publishes a synthetic <code>Fill</code> event onto the <code>EventBus</code> after a configurable simulated delay.</li>
+<li>Default simulated round-trip latency: <strong>5 ms</strong>.</li>
+</ol>
+<h2 id="custom-latency"><a class="header" href="#custom-latency">Custom latency</a></h2>
+<p>The paper gateway latency is set in code:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// crates/cli/src/run.rs
+let gateway = PaperGateway::with_latency(Duration::from_millis(10));
+<span class="boring">}</span></code></pre>
+<h2 id="limitations"><a class="header" href="#limitations">Limitations</a></h2>
+<ul>
+<li>No partial fills — orders either fill completely or not at all.</li>
+<li>No queue position — the paper gateway assumes your order is at the top of the queue.</li>
+<li>Simulated latency is constant; real latency is variable.</li>
+</ul>
+<p>These simplifications make paper results optimistic. Use backtesting on recorded data for more realistic simulation.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="backtesting"><a class="header" href="#backtesting">Backtesting</a></h1>
+<p>The <code>backtest</code> subcommand replays a recorded Parquet file through a strategy and reports PnL.</p>
+<h2 id="run-a-backtest"><a class="header" href="#run-a-backtest">Run a backtest</a></h2>
+<pre><code class="language-bash">cargo run --bin mercury -- backtest \
+  --file data.parquet \
+  --strategy market_maker
+</code></pre>
+<h2 id="how-it-works-1"><a class="header" href="#how-it-works-1">How it works</a></h2>
+<ol>
+<li><code>Player</code> reads the Parquet file and replays <code>BookUpdate</code> events in timestamp order.</li>
+<li><code>StrategyRunner</code> drives the strategy as if events were live.</li>
+<li><code>SimulatedExchange</code> matches orders against the replayed book with zero latency (conservative: assumes worst-case fill at the top of the book).</li>
+<li>Results are printed to stdout and written to <code>backtest_results.json</code>.</li>
+</ol>
+<h2 id="output"><a class="header" href="#output">Output</a></h2>
+<pre><code>Symbol:   BTCUSDT
+Strategy: market_maker
+Trades:   1,243
+Win rate: 54.2%
+PnL:      +$312.47
+Max DD:   -$48.20
+Sharpe:   1.84
+</code></pre>
+<h2 id="tips-1"><a class="header" href="#tips-1">Tips</a></h2>
+<ul>
+<li>Record a representative data set (at least a few hours) before running a backtest.</li>
+<li>Use <code>--speed 0</code> to replay as fast as possible (no wall-clock sleep between ticks).</li>
+<li>Run multiple strategies on the same file to compare them fairly.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="recording-market-data"><a class="header" href="#recording-market-data">Recording Market Data</a></h1>
+<p>The <code>record</code> subcommand captures live tick data to a Parquet file for later replay or backtesting.</p>
+<h2 id="basic-usage"><a class="header" href="#basic-usage">Basic usage</a></h2>
+<pre><code class="language-bash"># Record 60 seconds (default)
+cargo run --bin mercury -- record --symbol BTCUSDT --output data.parquet
+
+# Record 10 minutes
+cargo run --bin mercury -- record --symbol BTCUSDT --output data.parquet --duration 600
+</code></pre>
+<h2 id="output-format"><a class="header" href="#output-format">Output format</a></h2>
+<p>The Parquet file contains one row per <code>BookUpdate</code> event with columns:</p>
+<ul>
+<li><code>timestamp</code> — Unix milliseconds</li>
+<li><code>symbol</code> — trading symbol</li>
+<li><code>bid_price</code>, <code>bid_qty</code> — best bid</li>
+<li><code>ask_price</code>, <code>ask_qty</code> — best ask</li>
+</ul>
+<p>Prices and quantities are stored as UTF-8 decimal strings to preserve exact precision.</p>
+<h2 id="storage-size"><a class="header" href="#storage-size">Storage size</a></h2>
+<p>Roughly 1–3 MB per minute for a single symbol at normal Binance update frequency (~10 updates/sec). A one-hour recording of BTCUSDT is typically 60–180 MB.</p>
+<h2 id="using-recorded-data"><a class="header" href="#using-recorded-data">Using recorded data</a></h2>
+<pre><code class="language-bash"># Replay at real-time speed
+cargo run --bin mercury -- replay --file data.parquet --speed 1.0
+
+# Run a backtest
+cargo run --bin mercury -- backtest --file data.parquet --strategy rsi
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="adding-a-new-exchange"><a class="header" href="#adding-a-new-exchange">Adding a New Exchange</a></h1>
+<p>Adding exchange support requires implementing two traits: <code>FeedParser</code> (market data) and <code>ExchangeGateway</code> (order routing).</p>
+<h2 id="1-market-feed"><a class="header" href="#1-market-feed">1. Market feed</a></h2>
+<p>Create <code>crates/market/src/myexchange.rs</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct MyExchangeParser;
+
+impl FeedParser for MyExchangeParser {
+    fn ws_url(&amp;self, symbol: &amp;Symbol) -&gt; String {
+        format!("wss://stream.myexchange.com/ws/{}", symbol)
+    }
+
+    fn subscribe_message(&amp;self, symbol: &amp;Symbol) -&gt; String {
+        serde_json::json!({ "op": "subscribe", "channel": symbol.to_string() }).to_string()
+    }
+
+    fn parse(&amp;self, msg: &amp;str) -&gt; Vec&lt;EventPayload&gt; {
+        // deserialise msg and return BookUpdate / Trade events
+        vec![]
+    }
+}
+<span class="boring">}</span></code></pre>
+<h2 id="2-gateway"><a class="header" href="#2-gateway">2. Gateway</a></h2>
+<p>Create <code>crates/gateway/src/myexchange.rs</code> and implement <code>ExchangeGateway</code>.</p>
+<p>See <code>crates/gateway/src/binance.rs</code> as a reference for HMAC signing, REST error handling, and order ID mapping.</p>
+<h2 id="3-add-the-exchange-variant"><a class="header" href="#3-add-the-exchange-variant">3. Add the Exchange variant</a></h2>
+<p>In <code>crates/core/src/types.rs</code>, add to the <code>Exchange</code> enum:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum Exchange {
+    Binance,
+    Coinbase,
+    MyExchange, // add this
+    // ...
+}
+<span class="boring">}</span></code></pre>
+<h2 id="4-wire-up-in-the-cli"><a class="header" href="#4-wire-up-in-the-cli">4. Wire up in the CLI</a></h2>
+<p>In <code>crates/cli/src/run.rs</code>, add a match arm for <code>"myexchange"</code> that constructs your feed parser and gateway.</p>
+<h2 id="5-test"><a class="header" href="#5-test">5. Test</a></h2>
+<p>Write unit tests for <code>parse()</code> with real WebSocket message payloads captured from the exchange. Use <code>cargo test -p mercury-market myexchange</code> to run them.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
+<h2 id="development-setup"><a class="header" href="#development-setup">Development setup</a></h2>
+<pre><code class="language-bash">git clone https://github.com/amjadjibon/mercury
+cd mercury
+cargo build --workspace
+cargo test --workspace
+</code></pre>
+<h2 id="code-conventions"><a class="header" href="#code-conventions">Code conventions</a></h2>
+<ul>
+<li><strong>No <code>f64</code> for financial values</strong> — use <code>rust_decimal::Decimal</code> and the <code>dec!()</code> macro.</li>
+<li><strong><code>Symbol</code> is 16 bytes</strong> — strings longer than 16 bytes are silently truncated.</li>
+<li><strong>No heap allocation on the hot path</strong> — prefer stack types in <code>on_book</code> and <code>on_trade</code>.</li>
+<li><strong>Comments only when the <em>why</em> is non-obvious</strong> — well-named identifiers document the what.</li>
+</ul>
+<h2 id="running-the-docs-locally"><a class="header" href="#running-the-docs-locally">Running the docs locally</a></h2>
+<pre><code class="language-bash">cargo install mdbook
+mdbook serve docs --open
+</code></pre>
+<h2 id="submitting-changes"><a class="header" href="#submitting-changes">Submitting changes</a></h2>
+<ol>
+<li>Fork the repository and create a feature branch.</li>
+<li>Run <code>cargo test --workspace</code> and <code>cargo build --workspace</code> — both must pass with zero warnings.</li>
+<li>Open a pull request with a description of what changed and why.</li>
+</ol>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-09f2665d.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-c22b7243.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+
+    </div>
+    </body>
+</html>
