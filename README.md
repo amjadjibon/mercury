@@ -4,6 +4,7 @@
 
 [![Build Status](https://github.com/amjadjibon/mercury/workflows/CI/badge.svg)](https://github.com/amjadjibon/mercury/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Docs](https://img.shields.io/badge/docs-github--pages-blue)](https://amjadjibon.github.io/mercury/)
 
 Mercury is a low-latency, event-driven trading engine for systematic and high-frequency crypto trading. It consumes real-time order book feeds, generates signals, enforces risk limits, executes orders across multiple venues, and supports deterministic replay for backtesting and analysis.
 
@@ -46,8 +47,8 @@ cargo bench
 ## CLI Reference
 
 ```
-mercury run      --symbol <SYM> [--exchange binance|coinbase|yahoo]
-                 [--strategy market_maker|momentum|rsi|arbitrage|inference]
+mercury run      --symbol <SYM> [--exchange binance|coinbase|bybit|kraken|okx|yahoo]
+                 [--strategy market_maker|momentum|rsi|arbitrage|inference|pairs|obi|triangular|sentiment|rl]
                  [--paper]
                  [--api-key <KEY>] [--secret-key <SECRET>]
                  [--log-level trace|debug|info|warn|error]
@@ -69,8 +70,8 @@ api_key    = "..."
 secret_key = "..."
 
 [risk]
-max_position       = "1.0"
-daily_loss_limit   = "500.0"
+max_position          = "1.0"
+daily_loss_limit      = "500.0"
 max_orders_per_second = 10
 
 [metrics]
@@ -88,14 +89,14 @@ Market Feeds (WebSocket)
    FeedManager          ← BinanceParser / CoinbaseParser / YahooFeed
         │
         ▼
-   EventBus             ← LMAX Disruptor-style ring buffer, lock-free fan-out
+   EventBus             ← lock-free MPMC ring buffer, independent subscriber cursors
         │
    ┌────┴─────────────────────────────┐
    ▼                                  ▼
 StrategyRunner (dedicated OS thread)  OrderManager
   on_book / on_trade / on_fill          ↓ risk checks
         │                           ExchangeGateway
-        ▼                             (Binance / Coinbase / Paper)
+        ▼                      (Binance/Coinbase/Bybit/Kraken/OKX/Paper)
    Signal events                         │
    → EventBus                        Fill events → EventBus
                                           │
@@ -106,16 +107,18 @@ StrategyRunner (dedicated OS thread)  OrderManager
 
 **Hot path**: feed parser → ring buffer publish → strategy spin-loop → signal → order submit. No heap allocation, no locks.
 
+The `EventBus` is a custom MPMC ring buffer (65,536 pre-allocated slots). Each subscriber tracks its own read cursor — events are written once and fanned out with no copies. Slow subscribers are lossy: they skip forward and report `Lagged`. `StrategyRunner` maintains a `HashMap<Symbol, OrderBook>` and reconstructs the full L2 book before calling strategies, so `on_book` always receives consistent state.
+
 ---
 
 ## Crate Structure
 
 | Crate | Description |
 |---|---|
-| `core` | `Event`, `EventBus` (ring buffer), shared types (`Symbol`, `Side`, `Order`, `Fill`, `Signal`), `IpcServer`, `Pool` |
+| `core` | `Event`, `EventBus` (ring buffer), shared types (`Symbol`, `Side`, `Order`, `Fill`, `Signal`, `StrategyId`), `IpcServer`, `Pool` |
 | `market` | `FeedManager`, `BinanceParser`, `CoinbaseParser`, `YahooFeed`, `BookBuilder` |
-| `gateway` | `BinanceGateway`, `CoinbaseGateway`, `PaperGateway`, `ExchangeGateway` trait |
-| `strategy` | `StrategyRunner`, `MarketMaker`, `Momentum`, `RsiStrategy`, `ArbitrageStrategy`, `InferenceStrategy`; indicators: SMA, EMA, RSI, MACD |
+| `gateway` | `BinanceGateway`, `CoinbaseGateway`, `BybitGateway`, `KrakenGateway`, `OkxGateway`, `PaperGateway`, `ExchangeGateway` trait |
+| `strategy` | `StrategyRunner`, `MarketMaker`, `Momentum`, `RsiStrategy`, `ArbitrageStrategy`, `InferenceStrategy`, `RlQuotePlacementStrategy`, `PairsStrategy`, `ObiStrategy`, `TriangularStrategy`, `SentimentStrategy`; indicators: SMA, EMA, RSI, MACD, ATR |
 | `risk` | `RiskManager` — position limits, daily loss guard, order rate limiter, kill switch |
 | `execution` | `OrderManager`, `SimulatedExchange` (backtest), `SmartOrderRouter`, `ExecutionMetrics` |
 | `replay` | `Recorder` (Parquet writer), `Player` (deterministic replay) |
@@ -129,22 +132,28 @@ StrategyRunner (dedicated OS thread)  OrderManager
 
 ## Strategies
 
-| Name | Trigger | Logic |
-|---|---|---|
-| `market_maker` | `on_book` | Posts bid/ask around mid; cancel-replaces on each update; inventory skew |
-| `momentum` | `on_trade` | Tracks buy/sell volume ratio over a window; signals when imbalance exceeds threshold |
-| `rsi` | `on_trade` | RSI < 30 → buy; RSI > 70 → sell |
-| `arbitrage` | `on_book` | Monitors BBO across exchanges; signals when Bid(A) > Ask(B) + min_profit |
-| `inference` | — | Stub; wired but emits no signals until ML backend is added |
+| Name | Flag | Trigger | Logic |
+|---|---|---|---|
+| Market Maker | `market_maker` | `on_book` | Symmetric quotes around mid with inventory skew; peg mode reduces cancel/replace churn |
+| Momentum | `momentum` | `on_trade` | EMA crossover; signals on fast/slow cross |
+| RSI | `rsi` | `on_trade` | RSI < 30 → buy; RSI > 70 → sell |
+| Arbitrage | `arbitrage` | `on_book` | Cross-exchange BBO spread; signals when Bid(A) > Ask(B) + min_profit |
+| Inference | `inference` | `on_book` | ONNX model or online logistic regression; falls back to incremental learning without a model file |
+| RL Quote Placement | `rl` | `on_book` | DQN-based quote placement with experience replay |
+| Pairs | `pairs` | `on_book` | Statistical arbitrage on correlated symbol pairs |
+| OBI | `obi` | `on_book` | Order book imbalance signals |
+| Triangular | `triangular` | `on_book` | Three-leg crypto triangular arbitrage |
+| Sentiment | `sentiment` | `on_sentiment` | News keyword scoring via `SentimentSignal` events |
 
 Implement the `Strategy` trait to add a new strategy:
 
 ```rust
-pub trait Strategy: Send {
+pub trait Strategy: Send + Sync {
     fn id(&self) -> StrategyId;
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal>;
     fn on_trade(&mut self, trade: &Trade) -> Vec<Signal>;
     fn on_fill(&mut self, fill: &Fill);
+    fn on_sentiment(&mut self, signal: &SentimentSignal) -> Vec<Signal> { vec![] }
     fn reset(&mut self);
 }
 ```
@@ -163,11 +172,11 @@ Measured on an M-series Mac; Linux co-location numbers will be lower.
 | `event_bus/roundtrip` | 290 ns | 210 ns | < 100 ns |
 | Hot-path heap allocations | many | **0** | 0 |
 
-Key techniques applied:
+Key techniques:
 
-- **Ring buffer EventBus** — LMAX Disruptor pattern; publisher writes once, all subscribers read the same pre-allocated slots with independent cursors (`UnsafeCell` + `AtomicU64`)
-- **Fixed-size arrays** — `BookUpdate` carries `[Level; 20]` instead of `Vec<Level>`; `StrategyId` is `#[repr(u8)]` instead of `String`
-- **Dedicated strategy thread** — `StrategyRunner::run_on_thread(core_id)` spins on the ring buffer off the tokio thread pool; pinned to a specific core via `core_affinity`
+- **Ring buffer EventBus** — publisher writes once; all subscribers read the same pre-allocated slots with independent `AtomicU64` cursors
+- **Fixed-size arrays** — `BookUpdate` carries `[Level; 20]` instead of `Vec<Level>`; `StrategyId` is `#[repr(u8)]` so `Signal` is fully stack-allocated
+- **Dedicated strategy thread** — `StrategyRunner` can be pinned to a specific CPU core via `core_affinity`
 - **TCP_NODELAY** on WebSocket connections; `SO_BUSY_POLL` on Linux
 - `stats_alloc` allocation tests enforce the zero-alloc invariant in CI
 
@@ -175,13 +184,11 @@ Key techniques applied:
 
 ## Observability
 
-While the engine is running:
-
 ```bash
 # Prometheus metrics
 curl http://localhost:9090/metrics
 
-# Structured logs (default INFO; override with --log-level)
+# Structured logs
 cargo run --bin mercury -- --log-level debug run --symbol BTCUSDT --paper
 ```
 
@@ -193,10 +200,21 @@ Exposed metrics: `mercury_fills_total`, `mercury_orders_submitted_total`, `mercu
 
 Configured via `mercury.toml` or `RiskConfig` defaults:
 
-- max position size per symbol
-- daily loss limit (kills new orders when breached)
-- max orders per second (rate limiter)
-- kill switch (halts all order submission)
+- Max position size per symbol
+- Daily loss limit (kills new orders when breached)
+- Max orders per second (token-bucket rate limiter)
+- Kill switch — halts all order submission and cancels open orders
+
+---
+
+## Documentation
+
+Full architecture docs and guides are available at **[amjadjibon.github.io/mercury](https://amjadjibon.github.io/mercury/)** or build locally:
+
+```bash
+cargo install mdbook
+mdbook serve docs --open
+```
 
 ---
 
@@ -214,6 +232,7 @@ Configured via `mercury.toml` or `RiskConfig` defaults:
 | `parquet` / `arrow` | 54 | Tick storage |
 | `hdrhistogram` | 7.5 | Latency percentiles |
 | `sqlx` | 0.7 | SQLite fill persistence |
+| `tract-onnx` | 0.21 | Pure-Rust ONNX inference (no system library) |
 | `metrics` + `metrics-exporter-prometheus` | 0.24 / 0.16 | Prometheus export |
 
 ---
