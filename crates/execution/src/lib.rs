@@ -3,15 +3,19 @@
 pub mod backtest;
 pub mod metrics;
 pub mod order_manager;
+pub mod pov;
 pub mod probe;
 pub mod queue_model;
 pub mod router;
 pub mod twap;
+pub mod vwap;
 
 pub use backtest::{BacktestResult, SimulatedExchange};
 pub use order_manager::OrderManager;
+pub use pov::PovExecutor;
 pub use probe::{LiquidityProbeConfig, LiquidityProber, ProbeFill, ProbeOrder};
 pub use queue_model::{FillProbabilityConfig, FillProbabilityModel};
 pub use router::Bbo;
 pub use router::SmartOrderRouter;
 pub use twap::TwapExecutor;
+pub use vwap::VwapExecutor;

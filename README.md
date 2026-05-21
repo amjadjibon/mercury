@@ -124,7 +124,7 @@ The `EventBus` is a custom MPMC ring buffer (65,536 pre-allocated slots). Each s
 | `gateway` | `BinanceGateway`, `CoinbaseGateway`, `BybitGateway`, `KrakenGateway`, `OkxGateway`, `PolymarketGateway`, `KalshiGateway`, `PaperGateway`, `ExchangeGateway` trait |
 | `strategy` | `StrategyRunner`, `MarketMaker`, `Momentum`, `RsiStrategy`, `ArbitrageStrategy`, `InferenceStrategy`, `RlQuotePlacementStrategy`, `PairsStrategy`, `ObiStrategy`, `TriangularStrategy`, `SentimentStrategy`; indicators: SMA, EMA, RSI, MACD, ATR |
 | `risk` | `RiskManager` — position limits, daily loss guard, order rate limiter, kill switch |
-| `execution` | `OrderManager`, `SimulatedExchange` (backtest), `SmartOrderRouter`, `ExecutionMetrics` |
+| `execution` | `OrderManager`, `SimulatedExchange` (backtest), `SmartOrderRouter`, `ExecutionMetrics`, `TwapExecutor`, `VwapExecutor`, `PovExecutor` |
 | `replay` | `Recorder` (Parquet writer), `Player` (deterministic replay) |
 | `metrics` | `LatencyTracker` (HDR histograms), `PnlTracker`, Prometheus export |
 | `storage` | `StorageManager` — SQLite via sqlx, persists fills |
@@ -160,6 +160,35 @@ pub trait Strategy: Send + Sync {
     fn on_sentiment(&mut self, signal: &SentimentSignal) -> Vec<Signal> { vec![] }
     fn reset(&mut self);
 }
+```
+
+---
+
+## Execution Algorithms
+
+Large parent orders can be worked via algorithmic executors in `crates/execution`. Each executor spawns a background task and emits child `Signal` events onto the `EventBus` for `OrderManager` to pick up.
+
+| Executor | Type | Logic |
+|---|---|---|
+| `TwapExecutor` | Time-weighted average price | Divides parent quantity into `N` equal slices emitted at uniform time intervals |
+| `VwapExecutor` | Volume-weighted average price | Sizes each slice proportionally to observed market trade volume; falls back to equal-weight when no volume is seen |
+| `PovExecutor` | Percentage of volume | Participates at a fixed fraction of observed market volume, bounded by min/max slice size; flushes any residual at deadline |
+
+```rust
+// TWAP — 10 equal slices over 5 minutes
+TwapExecutor::new(bus.clone()).execute(signal, 300, 10);
+
+// VWAP — 8 volume-proportional slices over 5 minutes
+VwapExecutor::new(bus.clone()).execute(signal, 300, 8);
+
+// POV — participate at 10% of market volume, slices between 0.01 and 1.0, 10-minute deadline
+PovExecutor::new(bus.clone()).execute(
+    signal,
+    0.10,                              // participation_rate
+    FixedPoint::from_decimal(dec!(0.01)), // min_slice_qty
+    FixedPoint::from_decimal(dec!(1.0)),  // max_slice_qty
+    600,                               // deadline_secs
+);
 ```
 
 ---
