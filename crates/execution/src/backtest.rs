@@ -31,22 +31,6 @@ pub struct BacktestResult {
     pub trade_log: Vec<TradeSummary>,
 }
 
-impl BacktestResult {
-    #[allow(dead_code)]
-    fn print_summary(&self) {
-        println!("\n=== Backtest Complete ===");
-        println!("Total Trades  : {}", self.total_trades);
-        println!("Total Volume  : {}", self.total_volume);
-        println!("PnL           : {:.4} USDT", self.pnl);
-        println!("Max Drawdown  : {:.2}%", self.max_drawdown * Decimal::from(100));
-        println!("Sharpe Ratio  : {:.3}", self.sharpe_ratio);
-        println!("Win Rate      : {:.1}%", self.win_rate * 100.0);
-        println!("Profit Factor : {:.3}", self.profit_factor);
-        println!("Avg Win       : {:.4} USDT", self.avg_win);
-        println!("Avg Loss      : {:.4} USDT", self.avg_loss);
-        println!("=========================\n");
-    }
-}
 
 /// Simulated exchange for backtesting.
 pub struct SimulatedExchange {

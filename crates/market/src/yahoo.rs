@@ -16,8 +16,6 @@ use yfinance_rs::{Ticker, YfClient};
 ///
 /// Uses yfinance-rs to fetch real-time quotes and convert them to Mercury events.
 pub struct YahooFeed {
-    #[allow(dead_code)]
-    client: YfClient,
     symbols: Vec<String>,
     poll_interval: Duration,
     shutdown_tx: Option<mpsc::Sender<()>>,
@@ -27,7 +25,6 @@ impl YahooFeed {
     /// Create a new Yahoo Finance feed.
     pub fn new(symbols: Vec<String>) -> Self {
         Self {
-            client: YfClient::default(),
             symbols,
             poll_interval: Duration::from_millis(1000), // Poll every second
             shutdown_tx: None,

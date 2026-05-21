@@ -33,7 +33,7 @@ This file tracks what comes next.
 
 - [x] **Post-only / maker-rebate mode** — set post-only limit orders to earn maker rebate instead of paying taker fee. `TimeInForce::PostOnly` is wired through `Signal`, `OrderManager`, and gateway order payloads.
 
-- [ ] **Peg orders** — re-quote at `best_bid ± tick` on every book update instead of cancel/replace. MarketMaker currently does cancel-replace; add a `peg_mode` flag that only re-quotes when the best price moves. File: `crates/strategy/src/market_maker.rs`.
+- [x] **Peg orders** — re-quote at `best_bid ± tick` on every book update instead of cancel/replace. MarketMaker currently does cancel-replace; add a `peg_mode` flag that only re-quotes when the best price moves. File: `crates/strategy/src/market_maker.rs`.
 
 - [x] **IOC / FOK time-in-force** — Immediate-Or-Cancel and Fill-Or-Kill needed for taker momentum strategies. TIF now flows from `Signal` to `Order`; Binance, OKX, Bybit, Coinbase, and Kraken map it in order payloads.
 
@@ -71,21 +71,21 @@ This file tracks what comes next.
 
 - [x] **Full LOB snapshot as CNN input** — add a 20-level bid+ask volume profile for 1D conv net models. `FeatureComputer::compute_lob_snapshot()` returns normalized `[2, 20]` depth, and `InferenceStrategy::new_lob_cnn()` supports ONNX input shape `[1, 2, 20]` while keeping the scalar `[1, 10]` path available.
 
-- [ ] **Reinforcement learning quote placement** — Deep Q-Network agent where action = (spread_width, skew) and reward = PnL - inventory_penalty. Research-grade; needs a simulated environment wrapper around `SimulatedExchange`. Add `crates/strategy/src/rl_strategy.rs`.
+- [x] **Reinforcement learning quote placement** — Deep Q-Network agent where action = (spread_width, skew) and reward = PnL - inventory_penalty. Research-grade; needs a simulated environment wrapper around `SimulatedExchange`. Add `crates/strategy/src/rl_strategy.rs`.
 
 ---
 
 ## Infrastructure
 
-- [ ] **`SO_BUSY_POLL` + isolated CPU core** — set `SO_BUSY_POLL=50` on the WebSocket socket and run the strategy thread on an isolated core (`isolcpus` kernel param). Linux only. File: `crates/market/src/feed.rs` + `crates/strategy/src/runner.rs`.
+- [x] **`SO_BUSY_POLL` + isolated CPU core** — set `SO_BUSY_POLL=50` on the WebSocket socket and run the strategy thread on an isolated core (`isolcpus` kernel param). Linux only. File: `crates/market/src/feed.rs` + `crates/strategy/src/runner.rs`.
 
-- [ ] **`SO_TIMESTAMPING` NIC timestamps** — parse `cmsg` ancillary data on the receive socket to get hardware NIC timestamp. Measures wire-to-strategy latency independent of `gettimeofday`. Linux only. File: `crates/market/src/feed.rs`.
+- [x] **`SO_TIMESTAMPING` NIC timestamps** — `SO_TIMESTAMP` + `SO_TIMESTAMPING` enabled on connect; `SIOCGSTAMPNS` ioctl reads kernel RX timestamp after each message; wire-to-dispatch latency logged at TRACE (< 1 ms) or WARN (≥ 1 ms). Linux only. File: `crates/market/src/feed.rs`.
 
 - [x] **`Arc<BookUpdate>` on event bus** — `BookUpdate` is 480 bytes; with 4 subscribers each copy costs ~1920 bytes per tick. `EventPayload::BookUpdate` now stores `Arc<BookUpdate>` so the bus stores one update and subscribers share it.
 
 - [x] **WebSocket fill delivery** — Binance `listenKey` + user data stream implemented in `crates/gateway/src/binance.rs`. Parses `executionReport` events with `execType=TRADE`. Keepalive task runs every 30 min.
 
-- [ ] **Feed reconnect tests** — reconnect logic in `crates/market/src/feed.rs` is untested. Add a test that simulates a dropped connection using a mock WebSocket server and asserts reconnect with backoff.
+- [x] **Feed reconnect tests** — reconnect logic in `crates/market/src/feed.rs` is untested. Add a test that simulates a dropped connection using a mock WebSocket server and asserts reconnect with backoff.
 
 ---
 
@@ -114,9 +114,9 @@ This file tracks what comes next.
 21. ~~Sentiment / news signal~~ ✅
 22. ~~Full LOB CNN input~~ ✅
 23. ~~`Arc<BookUpdate>` bus optimization~~ ✅
-24. Feed reconnect tests
-25. `SO_BUSY_POLL` + NIC timestamps (Linux only)
-26. RL quote placement (research-grade)
+24. ~~Feed reconnect tests~~ ✅
+25. ~~`SO_BUSY_POLL` + NIC timestamps (Linux only)~~ ✅
+26. ~~RL quote placement (research-grade)~~ ✅
 
 ---
 

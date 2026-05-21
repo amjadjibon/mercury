@@ -115,29 +115,15 @@ impl BinanceParser {
 /// Combined stream envelope: {"stream":"btcusdt@depth@100ms","data":{...}}
 #[derive(Debug, Deserialize)]
 struct CombinedStreamEnvelope {
-    #[allow(dead_code)]
-    stream: String,
     data: serde_json::Value,
 }
 
 /// Binance depth update message.
 #[derive(Debug, Deserialize)]
 struct BinanceDepthUpdate {
-    /// Event type
-    #[serde(rename = "e")]
-    #[allow(dead_code)]
-    event_type: String,
-    /// Event time
-    #[serde(rename = "E")]
-    #[allow(dead_code)]
-    event_time: u64,
     /// Symbol
     #[serde(rename = "s")]
     symbol: String,
-    /// First update ID
-    #[serde(rename = "U")]
-    #[allow(dead_code)]
-    first_update_id: u64,
     /// Final update ID
     #[serde(rename = "u")]
     final_update_id: u64,
@@ -152,14 +138,6 @@ struct BinanceDepthUpdate {
 /// Binance trade message.
 #[derive(Debug, Deserialize)]
 struct BinanceTrade {
-    /// Event type
-    #[serde(rename = "e")]
-    #[allow(dead_code)]
-    event_type: String,
-    /// Event time
-    #[serde(rename = "E")]
-    #[allow(dead_code)]
-    event_time: u64,
     /// Symbol
     #[serde(rename = "s")]
     symbol: String,

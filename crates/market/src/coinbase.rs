@@ -167,8 +167,6 @@ struct CoinbaseEvent {
 #[derive(Deserialize)]
 struct CoinbaseUpdate {
     side: String,
-    #[allow(dead_code)]
-    event_time: String,
     price_level: String,
     new_quantity: String,
     product_id: String,
@@ -181,8 +179,6 @@ struct CoinbaseTradeMsg {
     price: String,
     size: String,
     side: String,
-    #[allow(dead_code)]
-    time: String,
 }
 
 #[derive(serde::Serialize)]

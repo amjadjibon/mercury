@@ -48,6 +48,13 @@ pub struct MarketMaker {
     vol_estimator: VolatilityEstimator,
     /// Optional authoritative inventory skew source, usually `RiskManager::skew`.
     inventory_skew_provider: Option<InventorySkewProvider>,
+    /// When true, quotes are pegged to best bid/ask and only re-quoted when the
+    /// best price moves — avoids cancel/replace churn on unchanged books.
+    peg_mode: bool,
+    /// Last best-bid price emitted in peg mode; `None` means no quote yet.
+    peg_last_best_bid: Option<FixedPoint>,
+    /// Last best-ask price emitted in peg mode.
+    peg_last_best_ask: Option<FixedPoint>,
 }
 
 impl MarketMaker {
@@ -72,6 +79,9 @@ impl MarketMaker {
             // 50 ticks/bar × 20 bars — warm up after ~1000 ticks (~1–2 min at typical feed rate).
             vol_estimator: VolatilityEstimator::new(50, 20),
             inventory_skew_provider: None,
+            peg_mode: false,
+            peg_last_best_bid: None,
+            peg_last_best_ask: None,
         }
     }
 
@@ -96,6 +106,13 @@ impl MarketMaker {
     /// Use an external inventory skew source. Positive skew means long-heavy.
     pub fn with_inventory_skew_provider(mut self, provider: InventorySkewProvider) -> Self {
         self.inventory_skew_provider = Some(provider);
+        self
+    }
+
+    /// Enable peg mode: quotes are placed at the current best bid/ask and are
+    /// only re-sent when those prices change, avoiding cancel/replace churn.
+    pub fn with_peg_mode(mut self) -> Self {
+        self.peg_mode = true;
         self
     }
 
@@ -216,6 +233,50 @@ impl Strategy for MarketMaker {
     fn on_book(&mut self, book: &OrderBook) -> Vec<Signal> {
         self.tick_count += 1;
 
+        // --- Peg mode: quote at best bid/ask, re-quote only on price move ---
+        if self.peg_mode {
+            if let Some(mid_fp) = book.mid_price() {
+                self.update_variance(mid_fp.to_decimal());
+            }
+
+            let best_bid = book.best_bid().map(|l| l.price);
+            let best_ask = book.best_ask().map(|l| l.price);
+
+            if best_bid == self.peg_last_best_bid && best_ask == self.peg_last_best_ask {
+                return vec![];
+            }
+
+            let (Some(bid_price), Some(ask_price)) = (best_bid, best_ask) else {
+                return vec![];
+            };
+
+            self.peg_last_best_bid = Some(bid_price);
+            self.peg_last_best_ask = Some(ask_price);
+
+            return vec![
+                Signal {
+                    symbol: book.symbol,
+                    side: Side::Buy,
+                    order_type: OrderType::Limit,
+                    price: Some(bid_price),
+                    quantity: FixedPoint::from_decimal(self.order_size),
+                    strategy: self.id(),
+                    cancel_replace: true,
+                    time_in_force: mercury_core::TimeInForce::PostOnly,
+                },
+                Signal {
+                    symbol: book.symbol,
+                    side: Side::Sell,
+                    order_type: OrderType::Limit,
+                    price: Some(ask_price),
+                    quantity: FixedPoint::from_decimal(self.order_size),
+                    strategy: self.id(),
+                    cancel_replace: true,
+                    time_in_force: mercury_core::TimeInForce::PostOnly,
+                },
+            ];
+        }
+
         let mid_fp = match book.mid_price() {
             Some(m) => m,
             None => return vec![],
@@ -281,6 +342,8 @@ impl Strategy for MarketMaker {
         self.prev_mid = None;
         self.variance_ema = dec!(0.000001);
         self.vol_estimator.reset();
+        self.peg_last_best_bid = None;
+        self.peg_last_best_ask = None;
     }
 }
 
@@ -420,5 +483,51 @@ mod tests {
         mm.reset();
         assert_eq!(mm.inventory, Decimal::ZERO);
         assert_eq!(mm.prev_mid, None);
+    }
+
+    #[test]
+    fn test_peg_mode_quotes_at_best_prices() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0)).with_peg_mode();
+        let book = make_book(dec!(50000), dec!(50010));
+        let signals = mm.on_book(&book);
+        assert_eq!(signals.len(), 2);
+        // Bid pegged to best bid, ask pegged to best ask.
+        let best_bid = book.best_bid().unwrap().price;
+        let best_ask = book.best_ask().unwrap().price;
+        assert_eq!(signals[0].side, Side::Buy);
+        assert_eq!(signals[0].price.unwrap(), best_bid);
+        assert_eq!(signals[1].side, Side::Sell);
+        assert_eq!(signals[1].price.unwrap(), best_ask);
+    }
+
+    #[test]
+    fn test_peg_mode_suppresses_requote_when_price_unchanged() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0)).with_peg_mode();
+        let book = make_book(dec!(50000), dec!(50010));
+        // First tick — should emit.
+        assert_eq!(mm.on_book(&book).len(), 2);
+        // Same book again — best prices unchanged, should be silent.
+        assert_eq!(mm.on_book(&book).len(), 0);
+        assert_eq!(mm.on_book(&book).len(), 0);
+    }
+
+    #[test]
+    fn test_peg_mode_requotes_on_price_move() {
+        let mut mm = MarketMaker::new(10, dec!(0.1), dec!(10.0)).with_peg_mode();
+        let book1 = make_book(dec!(50000), dec!(50010));
+        assert_eq!(mm.on_book(&book1).len(), 2);
+
+        // Same prices — silent.
+        assert_eq!(mm.on_book(&book1).len(), 0);
+
+        // Best bid moves up by 5 — must re-quote.
+        let book2 = make_book(dec!(50005), dec!(50015));
+        let signals = mm.on_book(&book2);
+        assert_eq!(signals.len(), 2);
+        assert_eq!(
+            signals[0].price.unwrap(),
+            book2.best_bid().unwrap().price,
+            "re-quoted bid should track new best bid"
+        );
     }
 }

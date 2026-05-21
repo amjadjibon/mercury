@@ -408,11 +408,7 @@ struct NewOrderResponse {
 }
 
 #[derive(Debug, Deserialize)]
-struct CancelledOrder {
-    #[serde(rename = "orderId")]
-    #[allow(dead_code)]
-    order_id: u64,
-}
+struct CancelledOrder {}
 
 #[derive(Debug, Deserialize)]
 struct OpenOrderResponse {

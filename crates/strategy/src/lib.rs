@@ -1,6 +1,7 @@
 //! Mercury Strategy - Trading signal generation.
 
 pub mod arbitrage;
+pub mod rl_strategy;
 pub mod features;
 pub mod indicators;
 pub mod inference_strategy;
@@ -17,6 +18,7 @@ pub mod triangular;
 pub mod volatility;
 
 pub use arbitrage::ArbitrageStrategy;
+pub use rl_strategy::{DqnConfig, RlQuotePlacementStrategy};
 pub use features::{
     EXTENDED_FEATURE_COUNT, FEATURE_COUNT, FeatureComputer, HawkesIntensity, LOB_CHANNELS,
     LOB_LEVELS, VolumeEstimator,

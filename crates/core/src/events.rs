@@ -188,6 +188,7 @@ pub enum StrategyId {
     Obi = 6,
     Triangular = 7,
     Sentiment = 8,
+    RlQuotePlacement = 9,
     Unknown = 255,
 }
 
@@ -203,6 +204,7 @@ impl StrategyId {
             Self::Obi => "OBI",
             Self::Triangular => "Triangular",
             Self::Sentiment => "Sentiment",
+            Self::RlQuotePlacement => "RlQuotePlacement",
             Self::Unknown => "Unknown",
         }
     }
