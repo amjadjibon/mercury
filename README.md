@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/docs-github--pages-blue)](https://amjadjibon.github.io/mercury/)
 
-Mercury is a low-latency, event-driven trading engine for systematic and high-frequency crypto trading. It consumes real-time order book feeds, generates signals, enforces risk limits, executes orders across multiple venues, and supports deterministic replay for backtesting and analysis.
+Mercury is a low-latency, event-driven trading engine for systematic and high-frequency trading across crypto exchanges and prediction markets. It consumes real-time order book feeds, generates signals, enforces risk limits, executes orders across multiple venues, and supports deterministic replay for backtesting and analysis.
 
 ---
 
@@ -47,10 +47,14 @@ cargo bench
 ## CLI Reference
 
 ```
-mercury run      --symbol <SYM> [--exchange binance|coinbase|bybit|kraken|okx|yahoo]
+mercury run      --symbol <SYM>
+                 [--exchange binance|coinbase|bybit|kraken|okx|yahoo|polymarket|kalshi]
                  [--strategy market_maker|momentum|rsi|arbitrage|inference|pairs|obi|triangular|sentiment|rl]
                  [--paper]
                  [--api-key <KEY>] [--secret-key <SECRET>]
+                 [--okx-passphrase <PASS>]
+                 [--polymarket-passphrase <PASS>]
+                 [--kalshi-api-key-id <UUID>] [--kalshi-private-key <PEM|PATH>]
                  [--log-level trace|debug|info|warn|error]
 
 mercury record   --symbol <SYM> [--output <FILE>] [--duration <SECS>]
@@ -96,7 +100,7 @@ Market Feeds (WebSocket)
 StrategyRunner (dedicated OS thread)  OrderManager
   on_book / on_trade / on_fill          ↓ risk checks
         │                           ExchangeGateway
-        ▼                      (Binance/Coinbase/Bybit/Kraken/OKX/Paper)
+        ▼         (Binance/Coinbase/Bybit/Kraken/OKX/Polymarket/Kalshi/Paper)
    Signal events                         │
    → EventBus                        Fill events → EventBus
                                           │
@@ -116,8 +120,8 @@ The `EventBus` is a custom MPMC ring buffer (65,536 pre-allocated slots). Each s
 | Crate | Description |
 |---|---|
 | `core` | `Event`, `EventBus` (ring buffer), shared types (`Symbol`, `Side`, `Order`, `Fill`, `Signal`, `StrategyId`), `IpcServer`, `Pool` |
-| `market` | `FeedManager`, `BinanceParser`, `CoinbaseParser`, `YahooFeed`, `BookBuilder` |
-| `gateway` | `BinanceGateway`, `CoinbaseGateway`, `BybitGateway`, `KrakenGateway`, `OkxGateway`, `PaperGateway`, `ExchangeGateway` trait |
+| `market` | `FeedManager`, `BinanceParser`, `CoinbaseParser`, `YahooFeed`, `PolymarketParser`, `KalshiParser`, `BookBuilder` |
+| `gateway` | `BinanceGateway`, `CoinbaseGateway`, `BybitGateway`, `KrakenGateway`, `OkxGateway`, `PolymarketGateway`, `KalshiGateway`, `PaperGateway`, `ExchangeGateway` trait |
 | `strategy` | `StrategyRunner`, `MarketMaker`, `Momentum`, `RsiStrategy`, `ArbitrageStrategy`, `InferenceStrategy`, `RlQuotePlacementStrategy`, `PairsStrategy`, `ObiStrategy`, `TriangularStrategy`, `SentimentStrategy`; indicators: SMA, EMA, RSI, MACD, ATR |
 | `risk` | `RiskManager` — position limits, daily loss guard, order rate limiter, kill switch |
 | `execution` | `OrderManager`, `SimulatedExchange` (backtest), `SmartOrderRouter`, `ExecutionMetrics` |
@@ -156,6 +160,48 @@ pub trait Strategy: Send + Sync {
     fn on_sentiment(&mut self, signal: &SentimentSignal) -> Vec<Signal> { vec![] }
     fn reset(&mut self);
 }
+```
+
+---
+
+## Prediction Markets
+
+Mercury supports [Polymarket](https://polymarket.com) and [Kalshi](https://kalshi.com) alongside crypto exchanges. Binary outcome contracts (YES/NO shares priced 0–100 cents) map directly onto the existing `OrderBook`, `BookUpdate`, and `Fill` types — prices are stored as probabilities using `FixedPoint`.
+
+### Polymarket
+
+Markets are identified by a 64-character hex `condition_id`. Because `Symbol` is 16 bytes, Mercury uses the last 16 characters of the condition ID as the symbol key (the low-order bytes are unique per active market).
+
+```bash
+# Paper trade against a live Polymarket CLOB feed (no API keys needed)
+cargo run --bin mercury -- run \
+  --exchange polymarket \
+  --symbol 0xbd31dc8a20211944f6b70f31557f1001557b59905b7738480ca09bd4532f84af \
+  --paper \
+  --strategy momentum
+
+# Live trading
+EXCHANGE_API_KEY=your_api_key \
+EXCHANGE_SECRET_KEY=your_api_secret \
+POLYMARKET_PASSPHRASE=your_passphrase \
+  cargo run --bin mercury -- run \
+  --exchange polymarket \
+  --symbol 0x...condition_id... \
+  --strategy rsi
+```
+
+### Kalshi
+
+Market tickers (e.g. `TRUMPWIN-2024`) fit directly in the 16-byte `Symbol`. Authentication uses an RSA private key; pass either the PEM string or a path to a PEM file.
+
+```bash
+# Live trading
+KALSHI_API_KEY_ID=your-uuid-key-id \
+KALSHI_PRIVATE_KEY=./kalshi_key.pem \
+  cargo run --bin mercury -- run \
+  --exchange kalshi \
+  --symbol TRUMPWIN-2024 \
+  --strategy rsi
 ```
 
 ---
@@ -233,6 +279,7 @@ mdbook serve docs --open
 | `hdrhistogram` | 7.5 | Latency percentiles |
 | `sqlx` | 0.7 | SQLite fill persistence |
 | `tract-onnx` | 0.21 | Pure-Rust ONNX inference (no system library) |
+| `rsa` | 0.9 | RSA-SHA256 signing for Kalshi auth |
 | `metrics` + `metrics-exporter-prometheus` | 0.24 / 0.16 | Prometheus export |
 
 ---

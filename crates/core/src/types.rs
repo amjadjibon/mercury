@@ -281,6 +281,8 @@ pub enum Exchange {
     Kraken,
     Okx,
     Yahoo,
+    Polymarket,
+    Kalshi,
 }
 
 impl fmt::Display for Exchange {
@@ -292,6 +294,8 @@ impl fmt::Display for Exchange {
             Exchange::Kraken => write!(f, "Kraken"),
             Exchange::Okx => write!(f, "OKX"),
             Exchange::Yahoo => write!(f, "Yahoo"),
+            Exchange::Polymarket => write!(f, "Polymarket"),
+            Exchange::Kalshi => write!(f, "Kalshi"),
         }
     }
 }

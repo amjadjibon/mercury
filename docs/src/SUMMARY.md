@@ -42,6 +42,7 @@
 # Guides
 
 - [Paper Trading](./guides/paper-trading.md)
+- [Prediction Markets](./guides/prediction-markets.md)
 - [Backtesting](./guides/backtesting.md)
 - [Recording Market Data](./guides/recording.md)
 - [Adding an Exchange](./guides/new-exchange.md)

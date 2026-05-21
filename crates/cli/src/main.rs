@@ -7,9 +7,13 @@ use clap::{Parser, Subcommand};
 use mercury_core::EventBus;
 use mercury_gateway::{
     BinanceConfig, BinanceGateway, BybitConfig, BybitGateway, CoinbaseConfig, CoinbaseGateway,
-    ExchangeGateway, KrakenConfig, KrakenGateway, OkxConfig, OkxGateway,
+    ExchangeGateway, KalshiConfig, KalshiGateway, KrakenConfig, KrakenGateway, OkxConfig,
+    OkxGateway, PolymarketConfig, PolymarketGateway,
 };
-use mercury_market::{BinanceParser, BybitParser, CoinbaseParser, FeedManager, KrakenParser, OkxParser};
+use mercury_market::{
+    BinanceParser, BybitParser, CoinbaseParser, FeedManager, KalshiParser, KrakenParser,
+    OkxParser, PolymarketParser,
+};
 use mercury_risk::{RiskConfig, RiskManager};
 use mercury_strategy::{MarketMaker, StrategyRunner};
 use rust_decimal_macros::dec;
@@ -37,7 +41,7 @@ enum Commands {
         #[arg(short, long, required = true)]
         symbol: Vec<String>,
 
-        /// Exchange to use (binance, coinbase, yahoo)
+        /// Exchange to use (binance, coinbase, bybit, kraken, okx, yahoo, polymarket, kalshi)
         #[arg(short, long, default_value = "binance")]
         exchange: String,
 
@@ -49,17 +53,29 @@ enum Commands {
         #[arg(long)]
         paper: bool,
 
-        /// Exchange API key (Binance / Bybit / OKX / Kraken)
+        /// Exchange API key (Binance / Bybit / OKX / Kraken / Polymarket)
         #[arg(long, env = "EXCHANGE_API_KEY")]
         api_key: Option<String>,
 
-        /// Exchange secret key
+        /// Exchange secret key (Binance / Bybit / OKX / Kraken / Polymarket api_secret)
         #[arg(long, env = "EXCHANGE_SECRET_KEY")]
         secret_key: Option<String>,
 
         /// OKX passphrase (required for OKX only)
         #[arg(long, env = "OKX_PASSPHRASE")]
         okx_passphrase: Option<String>,
+
+        /// Polymarket API passphrase
+        #[arg(long, env = "POLYMARKET_PASSPHRASE")]
+        polymarket_passphrase: Option<String>,
+
+        /// Kalshi API key ID (UUID)
+        #[arg(long, env = "KALSHI_API_KEY_ID")]
+        kalshi_api_key_id: Option<String>,
+
+        /// Kalshi RSA private key (PEM string or path to PEM file)
+        #[arg(long, env = "KALSHI_PRIVATE_KEY")]
+        kalshi_private_key: Option<String>,
 
         /// Path to ONNX model file for InferenceStrategy
         #[arg(long, env = "MERCURY_MODEL_PATH")]
@@ -149,9 +165,25 @@ async fn main() -> Result<()> {
             api_key,
             secret_key,
             okx_passphrase,
+            polymarket_passphrase,
+            kalshi_api_key_id,
+            kalshi_private_key,
             model_path,
         } => {
-            run_trading(symbols, exchange, strategy, paper, api_key, secret_key, okx_passphrase, model_path).await?;
+            run_trading(
+                symbols,
+                exchange,
+                strategy,
+                paper,
+                api_key,
+                secret_key,
+                okx_passphrase,
+                polymarket_passphrase,
+                kalshi_api_key_id,
+                kalshi_private_key,
+                model_path,
+            )
+            .await?;
         }
         Commands::Dataset { file, output, lookahead, threshold } => {
             run_dataset(file, output, lookahead, threshold).await?;
@@ -182,6 +214,9 @@ async fn run_trading(
     api_key: Option<String>,
     secret_key: Option<String>,
     okx_passphrase: Option<String>,
+    polymarket_passphrase: Option<String>,
+    kalshi_api_key_id: Option<String>,
+    kalshi_private_key: Option<String>,
     model_path: Option<String>,
 ) -> Result<()> {
     let cfg = config::Config::load_default();
@@ -339,6 +374,29 @@ async fn run_trading(
                     secret_key: secret_key.unwrap_or_default(),
                 };
                 Arc::new(KrakenGateway::new(gateway_config))
+            }
+            "polymarket" => {
+                let cfg = PolymarketConfig {
+                    api_key: api_key.unwrap_or_default(),
+                    api_secret: secret_key.unwrap_or_default(),
+                    api_passphrase: polymarket_passphrase.unwrap_or_default(),
+                };
+                Arc::new(PolymarketGateway::new(cfg))
+            }
+            "kalshi" => {
+                let pem = kalshi_private_key.unwrap_or_default();
+                // Allow passing a file path instead of the raw PEM string
+                let pem = if std::path::Path::new(&pem).exists() {
+                    std::fs::read_to_string(&pem)
+                        .with_context(|| format!("Reading Kalshi PEM from {}", pem))?
+                } else {
+                    pem
+                };
+                let cfg = KalshiConfig {
+                    api_key_id: kalshi_api_key_id.unwrap_or_default(),
+                    private_key_pem: pem,
+                };
+                Arc::new(KalshiGateway::new(cfg))
             }
             "yahoo" => {
                 anyhow::bail!("Yahoo Finance does not support trading");
@@ -519,6 +577,16 @@ async fn run_trading(
         "kraken" => {
             feed_manager
                 .subscribe(KrakenParser, symbols.clone())
+                .await?;
+        }
+        "polymarket" => {
+            feed_manager
+                .subscribe(PolymarketParser, symbols.clone())
+                .await?;
+        }
+        "kalshi" => {
+            feed_manager
+                .subscribe(KalshiParser, symbols.clone())
                 .await?;
         }
         _ => {

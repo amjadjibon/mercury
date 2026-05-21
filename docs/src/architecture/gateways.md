@@ -23,6 +23,8 @@ pub trait ExchangeGateway: Send + Sync {
 | `BybitGateway` | Bybit v5 | HMAC-SHA256 signing |
 | `KrakenGateway` | Kraken v0 | HMAC-SHA512 with nonce |
 | `OkxGateway` | OKX v5 | HMAC-SHA256, base64 |
+| `PolymarketGateway` | Polymarket CLOB | HMAC-SHA256; fills via WebSocket user channel |
+| `KalshiGateway` | Kalshi v2 | RSA-SHA256 private key signing |
 | `PaperGateway` | — | Local simulated matching |
 
 ## PaperGateway
@@ -44,4 +46,4 @@ PaperGateway::with_latency(Duration::from_millis(10))
 1. Create `crates/gateway/src/myexchange.rs`
 2. Implement `ExchangeGateway`
 3. Add the variant to `Exchange` enum in `mercury-core`
-4. Register in `crates/cli/src/run.rs`
+4. Register in `crates/cli/src/main.rs` (gateway match and feed_manager match)

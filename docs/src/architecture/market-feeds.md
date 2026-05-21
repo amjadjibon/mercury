@@ -31,6 +31,11 @@ Once implemented, register your parser with `FeedManager::add_feed`.
 |--------|----------|------|
 | `BinanceParser` | Binance | Order book depth (L2), trades |
 | `CoinbaseParser` | Coinbase | Order book depth (L2), trades |
+| `BybitParser` | Bybit | Order book depth (L2), trades |
+| `KrakenParser` | Kraken | Order book depth (L2), trades |
+| `OkxParser` | OKX | Order book depth (L2), trades |
+| `PolymarketParser` | Polymarket CLOB | Order book snapshots and deltas |
+| `KalshiParser` | Kalshi | Order book snapshots and deltas |
 | `YahooFeed` | Yahoo Finance | OHLCV bars (HTTP polling) |
 
 ## BookBuilder
