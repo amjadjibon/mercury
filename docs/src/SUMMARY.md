@@ -37,6 +37,7 @@
 - [RSI](./strategies/rsi.md)
 - [Arbitrage](./strategies/arbitrage.md)
 - [ML Inference](./strategies/inference.md)
+- [ML Components](./strategies/ml-components.md)
 - [Writing a Strategy](./strategies/custom.md)
 
 # Guides

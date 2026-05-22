@@ -1,7 +1,8 @@
 //! Deep Q-Network (DQN) quote-placement strategy.
 //!
-//! The agent observes a 6-dimensional market state and selects one of 9 discrete
-//! actions encoding (spread_width, inventory_skew) for the next posted quotes.
+//! The agent observes a 7-dimensional market state (6 market features + HMM regime
+//! probability) and selects one of 9 discrete actions encoding (spread_width,
+//! inventory_skew) for the next posted quotes.
 //!
 //! ## Action space  (3 spread widths × 3 skew levels = 9 actions)
 //!
@@ -21,9 +22,10 @@
 //! `reward = Δ(unrealised PnL) − α · inventory²`
 //!
 //! ## Q-network
-//! 2-hidden-layer MLP (6 → 24 → 12 → 9), trained online via experience replay
+//! 2-hidden-layer MLP (7 → 24 → 12 → 9), trained online via experience replay
 //! (2 000-step ring buffer, batch SGD, target-network sync every 100 train steps).
 
+use crate::regime::{HmmConfig, HmmFilter};
 use crate::traits::Strategy;
 use mercury_core::{Fill, FixedPoint, OrderBook, OrderType, Quantity, Side, Signal, StrategyId, Trade};
 use rust_decimal::Decimal;
@@ -32,7 +34,7 @@ use rust_decimal_macros::dec;
 
 // ── Network dimensions ────────────────────────────────────────────────────────
 
-const STATE_DIM: usize = 6;
+const STATE_DIM: usize = 7;
 const HIDDEN1: usize = 24;
 const HIDDEN2: usize = 12;
 const N_ACTIONS: usize = 9;
@@ -313,6 +315,9 @@ pub struct RlQuotePlacementStrategy {
     variance_ema: f32,
     prev_state: Option<[f32; STATE_DIM]>,
     prev_action: Option<usize>,
+
+    // Regime filter
+    hmm: HmmFilter,
 }
 
 impl RlQuotePlacementStrategy {
@@ -348,6 +353,7 @@ impl RlQuotePlacementStrategy {
             variance_ema: 1e-6,
             prev_state: None,
             prev_action: None,
+            hmm: HmmFilter::new(HmmConfig::default()),
         }
     }
 
@@ -376,6 +382,7 @@ impl RlQuotePlacementStrategy {
 
     fn compute_state(&mut self, book: &OrderBook, mid: Decimal) -> [f32; STATE_DIM] {
         let mid_f = mid.to_f32().unwrap_or(0.0);
+        self.hmm.update_price(mid_f as f64);
 
         // Feature 0: normalised mid-price return (clamped to ±2%)
         let mid_return = if let Some(prev) = self.prev_mid {
@@ -420,7 +427,10 @@ impl RlQuotePlacementStrategy {
             .max(1.0);
         let pnl_norm = (self.session_pnl.to_f32().unwrap_or(0.0) / notional).clamp(-1.0, 1.0);
 
-        [mid_return, spread_norm, inv_norm, vol_norm, obi, pnl_norm]
+        // Feature 6: HMM trend probability centred at 0; 0.5 trending, -0.5 mean-reverting.
+        let regime_feat = self.hmm.trend_probability() as f32 - 0.5;
+
+        [mid_return, spread_norm, inv_norm, vol_norm, obi, pnl_norm, regime_feat]
     }
 
     // ── Reward ────────────────────────────────────────────────────────────────
@@ -571,6 +581,7 @@ impl Strategy for RlQuotePlacementStrategy {
         self.prev_action = None;
         self.variance_ema = 1e-6;
         self.epsilon = self.config.epsilon_start;
+        self.hmm.reset();
         // Q-network weights are intentionally preserved across resets so that
         // accumulated learning survives episode boundaries.
     }

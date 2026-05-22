@@ -23,11 +23,12 @@ pub trait Strategy: Send + Sync {
 
 | Name | Flag | Description |
 |------|------|-------------|
-| `MarketMaker` | `market_maker` | Symmetric quotes around mid with inventory skew |
+| `MarketMaker` | `market_maker` | Symmetric quotes with inventory skew and HMM regime gating (2× spread when trending, 0.75× when mean-reverting) |
 | `Momentum` | `momentum` | Trend-following using EMA crossover |
 | `RsiStrategy` | `rsi` | Mean-reversion using RSI overbought/oversold |
 | `ArbitrageStrategy` | `arbitrage` | Cross-exchange price discrepancy |
-| `InferenceStrategy` | `inference` | ONNX model inference |
+| `InferenceStrategy` | `inference` | ONNX or online Adam-SGD classifier on 12-feature vector with Welford z-score normalisation |
+| `RlQuotePlacementStrategy` | `rl` | DQN quote placement; 7-state input adds HMM trend probability alongside 6 market features |
 
 ## Technical indicators
 

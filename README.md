@@ -138,12 +138,12 @@ The `EventBus` is a custom MPMC ring buffer (65,536 pre-allocated slots). Each s
 
 | Name | Flag | Trigger | Logic |
 |---|---|---|---|
-| Market Maker | `market_maker` | `on_book` | Symmetric quotes around mid with inventory skew; peg mode reduces cancel/replace churn |
+| Market Maker | `market_maker` | `on_book` | Symmetric quotes with inventory skew and HMM regime gating; widens spread 2× when trending, tightens 0.75× when mean-reverting |
 | Momentum | `momentum` | `on_trade` | EMA crossover; signals on fast/slow cross |
 | RSI | `rsi` | `on_trade` | RSI < 30 → buy; RSI > 70 → sell |
 | Arbitrage | `arbitrage` | `on_book` | Cross-exchange BBO spread; signals when Bid(A) > Ask(B) + min_profit |
-| Inference | `inference` | `on_book` | ONNX model or online logistic regression; falls back to incremental learning without a model file |
-| RL Quote Placement | `rl` | `on_book` | DQN-based quote placement with experience replay |
+| Inference | `inference` | `on_book` | ONNX or Adam-SGD online classifier on 12-feature vector (10 market + Kyle's λ + VPIN) with Welford z-score normalisation |
+| RL Quote Placement | `rl` | `on_book` | DQN quote placement with 7-state input (6 market features + HMM trend probability) and experience replay |
 | Pairs | `pairs` | `on_book` | Statistical arbitrage on correlated symbol pairs |
 | OBI | `obi` | `on_book` | Order book imbalance signals |
 | Triangular | `triangular` | `on_book` | Three-leg crypto triangular arbitrage |
@@ -189,6 +189,73 @@ PovExecutor::new(bus.clone()).execute(
     FixedPoint::from_decimal(dec!(1.0)),  // max_slice_qty
     600,                               // deadline_secs
 );
+```
+
+---
+
+## ML Components
+
+Mercury's `mercury-strategy` crate ships production-ready machine-learning building blocks that strategies compose at runtime — no Python, no external service.
+
+### Feature vector (12 features, `FeatureComputer`)
+
+| # | Feature | Notes |
+|---|---------|-------|
+| 0 | Order imbalance | `(bid_qty − ask_qty) / (bid_qty + ask_qty)` ∈ [−1, 1] |
+| 1 | Spread bps / 100 | Normalised bid-ask spread |
+| 2 | RSI-14 / 100 | |
+| 3 | MACD histogram sign × magnitude | Clamped to [−1, 1] |
+| 4 | Depth ratio (top-5 bid / total) | |
+| 5 | EMA-50 deviation | `(mid − ema50) / ema50` |
+| 6 | ATR-14 / mid | Normalised average true range |
+| 7 | VWAP deviation (100-trade rolling) | |
+| 8 | Depth slope | `(bid[0] − bid[4]) / mid` |
+| 9 | Trade-flow imbalance (20-trade rolling) | Buy volume fraction ∈ [0, 1] |
+| 10 | **Kyle's Lambda** | `tanh(λ × 1000)` — price-impact coefficient from rolling OLS on signed order flow ∈ (−1, 1) |
+| 11 | **VPIN** | Volume-synchronised probability of informed trading ∈ [0, 1]; >0.5 signals toxic flow |
+
+`compute_extended()` appends a 13th feature: Hawkes trade-arrival intensity.
+
+### Online normalisation (`RunningNormalizer`)
+
+Welford one-pass algorithm maintains running mean and variance per feature. After a 30-tick warm-up, `InferenceStrategy` standardises the 12-feature vector to approximately zero mean / unit variance before feeding the Adam-SGD classifier. Converges 3–5× faster than unnormalised features on volatile symbols.
+
+### Adam optimizer (`OnlineClassifier`)
+
+Replaces vanilla SGD. Uses bias-corrected first/second moment estimates (β₁ = 0.9, β₂ = 0.999, ε = 1e-8, lr = 0.001). L2 regularisation (`l2 = 1e-4`) prevents weight explosion on stationary features.
+
+### HMM regime filter (`HmmFilter`)
+
+Two-state online forward filter (`Trending` / `MeanReverting`) driven by consecutive log-return sign persistence. Outputs a `trend_probability` ∈ [0, 1] after two price updates; confident regime declared above 0.60 threshold.
+
+**MarketMaker integration** — spread multiplier applied on every `on_book` call:
+
+| Regime | Spread multiplier |
+|--------|-------------------|
+| Trending | 2.0× (widen — adverse selection risk) |
+| MeanReverting | 0.75× (tighten — capture more mean-reversion fills) |
+| Uncertain | 1.0× (no change) |
+
+**DQN integration** — `RlQuotePlacementStrategy` appends `trend_probability − 0.5` as state dimension 6 (0 = uncertain, +0.5 = fully trending, −0.5 = fully mean-reverting). The network architecture expands from 6 → 7 → 24 → 12 → 9.
+
+### Microstructure estimators (`microstructure.rs`)
+
+| Struct | Algorithm | Output |
+|--------|-----------|--------|
+| `KyleLambda` | Rolling OLS: `λ = Σ(Q·ΔP) / Σ(Q²)` | Price-impact coefficient; rising λ signals informed flow |
+| `RollSpread` | Roll (1984): `c = √(−Cov(ΔP_t, ΔP_{t−1}))` | Effective half-spread estimate |
+| `Vpin` | Bucket-based `\|buy_vol − sell_vol\| / bucket_size` | Trade toxicity ∈ [0, 1] |
+
+### Model checkpointing (`checkpoint.rs`)
+
+```rust
+// Save/load OnlineClassifier weights (compact JSON).
+clf.save("model.json")?;
+clf.load("model.json")?;
+
+// Save/load DQN network weights (raw f32 LE binary).
+save_f32_weights("dqn.bin", &[&w1_flat, &w2_flat, &w3_flat])?;
+let weights = load_f32_weights("dqn.bin", total_params)?;
 ```
 
 ---

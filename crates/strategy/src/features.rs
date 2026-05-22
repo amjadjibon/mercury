@@ -7,12 +7,20 @@
 //! or `compute_lob_snapshot()` for a `[2, 20]` bid/ask volume profile.
 
 use crate::indicators::{Atr, Ema, Macd, Rsi, Window};
+use crate::microstructure::{KyleLambda, Vpin};
 use mercury_core::{OrderBook, Quantity, Trade};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::collections::VecDeque;
 
 /// Number of features in the output vector.
-pub const FEATURE_COUNT: usize = 10;
+///
+/// | Index | Feature |
+/// |-------|---------|
+/// | 0–9   | Core market features (see `FeatureComputer::compute` docs) |
+/// | 10    | Kyle's Lambda (adverse selection proxy, tanh-squashed) |
+/// | 11    | VPIN trade toxicity ∈ \[0, 1\] |
+pub const FEATURE_COUNT: usize = 12;
 
 /// Online z-score normalizer using Welford's one-pass algorithm.
 ///
@@ -73,7 +81,7 @@ impl RunningNormalizer {
     }
 }
 /// Number of features when including Hawkes trade-arrival intensity.
-pub const EXTENDED_FEATURE_COUNT: usize = 11;
+pub const EXTENDED_FEATURE_COUNT: usize = 13;
 /// Bid and ask channels in the LOB CNN input.
 pub const LOB_CHANNELS: usize = 2;
 /// Number of order-book levels per side in the LOB CNN input.
@@ -230,12 +238,14 @@ impl Default for VolumeEstimator {
 /// | 7 | VWAP deviation ((mid − vwap) / vwap) rolling 100 trades | uncapped |
 /// | 8 | Depth slope (bid_qty[0] − bid_qty[4]) / mid | uncapped |
 /// | 9 | Trade-flow imbalance (buy_vol / total_vol) last 20 trades | \[0, 1\] |
+/// | 10 | Kyle's Lambda (price-impact coeff, tanh-squashed) | \[−1, 1\] |
+/// | 11 | VPIN trade toxicity (rolling bucket average) | \[0, 1\] |
 ///
 /// `compute_extended()` appends:
 ///
 /// | Index | Feature | Range |
 /// |-------|---------|-------|
-/// | 10 | Hawkes trade-arrival intensity | \[0, 1) |
+/// | 12 | Hawkes trade-arrival intensity | \[0, 1) |
 #[derive(Debug, Clone)]
 pub struct FeatureComputer {
     rsi: Rsi,
@@ -252,6 +262,10 @@ pub struct FeatureComputer {
     flow_sell_sum: Decimal,
     hawkes: HawkesIntensity,
     last_trade_ts: Option<i64>,
+    // Microstructure
+    kyle: KyleLambda,
+    vpin: Vpin,
+    last_mid: Option<Decimal>,
 }
 
 const VWAP_WINDOW: usize = 100;
@@ -272,14 +286,26 @@ impl FeatureComputer {
             flow_sell_sum: Decimal::ZERO,
             hawkes: HawkesIntensity::default(),
             last_trade_ts: None,
+            kyle: KyleLambda::new(20),
+            vpin: Vpin::new(10.0, 20),
+            last_mid: None,
         }
     }
 
-    /// Feed a trade to update VWAP and order-flow features.
+    /// Feed a trade to update VWAP, order-flow, and microstructure features.
     pub fn on_trade(&mut self, trade: &Trade) {
         use mercury_core::Side;
         self.hawkes.on_trade(trade.timestamp);
         self.last_trade_ts = Some(trade.timestamp);
+
+        // Microstructure updates.
+        let qty_f64 = trade.quantity.to_f64().unwrap_or(0.0);
+        let price_f64 = trade.price.to_f64().unwrap_or(0.0);
+        let last_mid_f64 = self.last_mid
+            .and_then(|m| m.to_f64())
+            .unwrap_or(price_f64);
+        self.kyle.on_trade(qty_f64, trade.side, price_f64 - last_mid_f64);
+        self.vpin.on_trade(qty_f64, trade.side);
 
         // VWAP window
         let pv = trade.price * trade.quantity;
@@ -309,10 +335,11 @@ impl FeatureComputer {
         }
     }
 
-    /// Compute the 10-element feature vector from an `OrderBook` snapshot.
+    /// Compute the 12-element feature vector from an `OrderBook` snapshot.
     /// Returns `None` if the book is invalid (no best bid/ask).
     pub fn compute(&mut self, book: &OrderBook) -> Option<[f32; FEATURE_COUNT]> {
         let mid = book.mid_price()?.to_decimal();
+        self.last_mid = Some(mid);
         let spread = book.spread().unwrap_or_default().to_decimal();
         let spread_bps = book.spread_bps().unwrap_or_default().to_decimal();
 
@@ -421,6 +448,14 @@ impl FeatureComputer {
             to_f32(self.flow_buy_sum / total_flow)
         };
 
+        // Feature 10: Kyle's Lambda — price-impact coefficient, tanh-squashed to (-1, 1).
+        let kyle_feat = self.kyle.lambda()
+            .map(|l| (l * 1_000.0).tanh() as f32)
+            .unwrap_or(0.0);
+
+        // Feature 11: VPIN — trade toxicity ∈ [0, 1].
+        let vpin_feat = self.vpin.vpin() as f32;
+
         Some([
             imbalance,
             spread_norm,
@@ -432,14 +467,15 @@ impl FeatureComputer {
             vwap_dev,
             depth_slope,
             trade_flow,
+            kyle_feat,
+            vpin_feat,
         ])
     }
 
-    /// Compute the extended 11-element feature vector.
+    /// Compute the extended 13-element feature vector.
     ///
-    /// The first 10 values match `compute()` exactly. Index 10 is bounded
-    /// Hawkes trade-arrival intensity, useful for new models without changing
-    /// the existing ONNX `[1, 10]` inference contract.
+    /// The first 12 values match `compute()` exactly. Index 12 is bounded
+    /// Hawkes trade-arrival intensity.
     pub fn compute_extended(&mut self, book: &OrderBook) -> Option<[f32; EXTENDED_FEATURE_COUNT]> {
         let base = self.compute(book)?;
         let mut extended = [0.0f32; EXTENDED_FEATURE_COUNT];
@@ -498,6 +534,9 @@ impl FeatureComputer {
         self.flow_sell_sum = Decimal::ZERO;
         self.hawkes.reset();
         self.last_trade_ts = None;
+        self.kyle.reset();
+        self.vpin.reset();
+        self.last_mid = None;
     }
 }
 

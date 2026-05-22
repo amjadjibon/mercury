@@ -4,7 +4,7 @@
 //! Outputs are softmax probabilities for [SELL, HOLD, BUY]. No model path →
 //! online SGD fallback.
 
-use crate::features::{FEATURE_COUNT, FeatureComputer, LOB_CHANNELS, LOB_LEVELS};
+use crate::features::{FEATURE_COUNT, FeatureComputer, LOB_CHANNELS, LOB_LEVELS, RunningNormalizer};
 use crate::traits::Strategy;
 use mercury_core::{
     Event, EventBus, EventPayload, Fill, FixedPoint, MLPrediction, OrderBook, OrderType, Quantity,
@@ -206,6 +206,7 @@ pub struct InferenceStrategy {
     online: OnlineClassifier,
     online_config: OnlineLearningConfig,
     online_window: VecDeque<(f64, [f32; FEATURE_COUNT])>,
+    normalizer: RunningNormalizer,
     event_bus: Option<Arc<EventBus>>,
     warned: bool,
 }
@@ -244,6 +245,7 @@ impl InferenceStrategy {
             online: OnlineClassifier::new(online_config.classifier),
             online_config,
             online_window: VecDeque::with_capacity(online_config.lookahead_ticks + 1),
+            normalizer: RunningNormalizer::new(30),
             event_bus,
             warned: model_path.is_none(),
         }
@@ -311,8 +313,9 @@ impl InferenceStrategy {
         let Some(bus) = self.event_bus.as_ref() else {
             return;
         };
+        // MLPrediction.features is fixed at 10 slots; copy first 10 of the 12-element vector.
         let mut feature_arr = [0f32; 10];
-        feature_arr[..FEATURE_COUNT].copy_from_slice(&feats);
+        feature_arr.copy_from_slice(&feats[..10]);
         let pred = MLPrediction {
             symbol: self.symbol,
             timestamp: mercury_core::now_nanos(),
@@ -388,10 +391,11 @@ impl Strategy for InferenceStrategy {
             return vec![];
         }
 
-        let feats = match self.features.compute(book) {
+        let mut feats = match self.features.compute(book) {
             Some(f) => f,
             None => return vec![],
         };
+        self.normalizer.update_and_normalize(&mut feats);
 
         let mid = match book.mid_price() {
             Some(m) => m,
@@ -475,6 +479,7 @@ impl Strategy for InferenceStrategy {
         self.features.reset();
         self.online.reset();
         self.online_window.clear();
+        self.normalizer.reset();
         self.warned = false;
     }
 }
