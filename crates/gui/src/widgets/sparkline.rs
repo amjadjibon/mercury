@@ -28,6 +28,19 @@ impl<Message> canvas::Program<Message> for Sparkline {
         };
         frame.fill(&Path::rectangle(Point::ORIGIN, bounds.size()), bg_fill);
 
+        // Draw horizontal grid lines (e.g. at 25%, 50%, 75% height)
+        let grid_stroke = Stroke::default()
+            .with_color(Color::from_rgba8(255, 255, 255, 0.05))
+            .with_width(1.0);
+        for i in 1..4 {
+            let y = bounds.height * (i as f32) / 4.0;
+            let line = Path::new(|builder| {
+                builder.move_to(Point::new(0.0, y));
+                builder.line_to(Point::new(bounds.width, y));
+            });
+            frame.stroke(&line, grid_stroke);
+        }
+
         if self.points.len() < 2 {
             return vec![frame.into_geometry()];
         }

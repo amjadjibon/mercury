@@ -1,5 +1,6 @@
-use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Fill};
+use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Fill, Text};
 use iced::{Rectangle, Point, Color, Theme, Renderer};
+
 
 /// L2 Order Book Depth Map GPU Canvas widget.
 pub struct DepthMap {
@@ -26,6 +27,29 @@ impl<Message> canvas::Program<Message> for DepthMap {
             ..Default::default()
         };
         frame.fill(&Path::rectangle(Point::ORIGIN, bounds.size()), bg_fill);
+
+        // Draw horizontal grid lines (e.g. at 25%, 50%, 75% height)
+        let grid_stroke = Stroke::default()
+            .with_color(Color::from_rgba8(255, 255, 255, 0.05))
+            .with_width(1.0);
+        for i in 1..4 {
+            let y = bounds.height * (i as f32) / 4.0;
+            let line = Path::new(|builder| {
+                builder.move_to(Point::new(0.0, y));
+                builder.line_to(Point::new(bounds.width, y));
+            });
+            frame.stroke(&line, grid_stroke);
+        }
+
+        // Draw vertical grid lines (e.g. at 25%, 75% width)
+        for i in &[0.25, 0.75] {
+            let x = bounds.width * i;
+            let line = Path::new(|builder| {
+                builder.move_to(Point::new(x, 0.0));
+                builder.line_to(Point::new(x, bounds.height));
+            });
+            frame.stroke(&line, grid_stroke);
+        }
 
         if self.bids.is_empty() && self.asks.is_empty() {
             // Draw loading state message if empty

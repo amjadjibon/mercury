@@ -467,54 +467,67 @@ impl MercuryApp {
         let theme_gray = Color::from_rgb8(150, 150, 155);
 
         // 1. TOP HEADER PANEL
-        let header = row![
-            text("MERCURY")
-                .size(24)
-                .font(Font { weight: font::Weight::Bold, ..Font::default() })
+        let header = container(
+            row![
+                text("MERCURY")
+                    .size(24)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_text_teal)
+                    .width(Length::FillPortion(1)),
+                row![
+                    text("SYMBOL: ")
+                        .size(14)
+                        .color(theme_gray),
+                    text(&self.symbol)
+                        .size(16)
+                        .font(Font { weight: font::Weight::Bold, ..Font::default() }),
+                ]
+                .spacing(5)
                 .width(Length::FillPortion(1)),
-            row![
-                text("SYMBOL: ")
-                    .size(14)
-                    .color(theme_gray),
-                text(&self.symbol)
-                    .size(16)
-                    .font(Font { weight: font::Weight::Bold, ..Font::default() }),
+                row![
+                    text("STATE: ")
+                        .size(14)
+                        .color(theme_gray),
+                    text(if self.is_connected { "LIVE" } else { "OFFLINE" })
+                        .size(16)
+                        .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                        .color(if self.is_connected { theme_text_teal } else { theme_text_pink }),
+                ]
+                .spacing(5)
+                .width(Length::FillPortion(1)),
+                row![
+                    text("BEST BID: ")
+                        .size(14)
+                        .color(theme_gray),
+                    text(format!("{:.2}", self.best_bid))
+                        .size(16)
+                        .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                        .color(theme_text_teal),
+                    text(" | BEST ASK: ")
+                        .size(14)
+                        .color(theme_gray),
+                    text(format!("{:.2}", self.best_ask))
+                        .size(16)
+                        .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                        .color(theme_text_pink),
+                ]
+                .spacing(5)
+                .width(Length::FillPortion(2)),
             ]
-            .spacing(5)
-            .width(Length::FillPortion(1)),
-            row![
-                text("STATE: ")
-                    .size(14)
-                    .color(theme_gray),
-                text(if self.is_connected { "LIVE" } else { "OFFLINE" })
-                    .size(16)
-                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
-                    .color(if self.is_connected { theme_text_teal } else { theme_text_pink }),
-            ]
-            .spacing(5)
-            .width(Length::FillPortion(1)),
-            row![
-                text("BEST BID: ")
-                    .size(14)
-                    .color(theme_gray),
-                text(format!("{:.2}", self.best_bid))
-                    .size(16)
-                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
-                    .color(theme_text_teal),
-                text(" | BEST ASK: ")
-                    .size(14)
-                    .color(theme_gray),
-                text(format!("{:.2}", self.best_ask))
-                    .size(16)
-                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
-                    .color(theme_text_pink),
-            ]
-            .spacing(5)
-            .width(Length::FillPortion(2)),
-        ]
-        .spacing(20)
+            .spacing(20)
+            .align_y(iced::Alignment::Center)
+        )
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(20, 20, 25))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
         .padding(15)
-        .align_y(iced::Alignment::Center);
+        .width(Length::Fill);
 
         // 2. MAIN OBSIDIAN BODY (3 PANELS GRID)
         
@@ -562,7 +575,16 @@ impl MercuryApp {
             ]
             .spacing(10)
         )
-        .padding(10)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(20, 20, 25))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding(15)
         .width(Length::FillPortion(1))
         .height(Length::Fill);
 
@@ -696,7 +718,16 @@ impl MercuryApp {
             ]
             .spacing(15)
         )
-        .padding(10)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(20, 20, 25))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding(15)
         .width(Length::FillPortion(1))
         .height(Length::Fill);
 
@@ -723,19 +754,71 @@ impl MercuryApp {
 
         let amount_input = text_input("0.1", &self.manual_amount)
             .on_input(Message::AmountChanged)
-            .padding(8);
+            .padding(8)
+            .style(move |_theme, status| text_input::Style {
+                background: iced::Background::Color(Color::from_rgb8(15, 15, 20)),
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::text_input::Status::Focused { .. } => theme_text_teal,
+                        iced::widget::text_input::Status::Hovered => Color::from_rgb8(70, 70, 75),
+                        _ => Color::from_rgb8(45, 45, 50),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                placeholder: Color::from_rgb8(100, 100, 105),
+                value: Color::WHITE,
+                selection: Color::from_rgba8(0, 240, 200, 0.2),
+                icon: Color::from_rgb8(150, 150, 150),
+            });
 
         let price_input = text_input("Limit Price (Optional)", &self.manual_price)
             .on_input(Message::PriceChanged)
             .padding(8);
 
-        let buy_btn = button(text("BUY / LONG").size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(Color::BLACK))
-            .on_press(Message::BuyClicked)
-            .padding(10);
+        let buy_btn = button(
+            text("BUY / LONG")
+                .size(14)
+                .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                .color(Color::BLACK)
+        )
+        .style(move |_, status| button::Style {
+            background: match status {
+                iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(0, 200, 160))),
+                _ => Some(iced::Background::Color(theme_text_teal)),
+            },
+            text_color: Color::BLACK,
+            border: iced::Border {
+                color: theme_text_teal,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .on_press(Message::BuyClicked)
+        .padding(10);
 
-        let sell_btn = button(text("SELL / SHORT").size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(Color::BLACK))
-            .on_press(Message::SellClicked)
-            .padding(10);
+        let sell_btn = button(
+            text("SELL / SHORT")
+                .size(14)
+                .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                .color(Color::WHITE)
+        )
+        .style(move |_, status| button::Style {
+            background: match status {
+                iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(220, 40, 100))),
+                _ => Some(iced::Background::Color(theme_text_pink)),
+            },
+            text_color: Color::WHITE,
+            border: iced::Border {
+                color: theme_text_pink,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .on_press(Message::SellClicked)
+        .padding(10);
 
         let quick_execute = column![
             text("MANUAL EXECUTION CONSOLE").size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }),
@@ -890,6 +973,19 @@ impl MercuryApp {
                 .font(Font { weight: font::Weight::Bold, ..Font::default() })
                 .color(Color::WHITE)
         )
+        .style(move |_, status| button::Style {
+            background: match status {
+                iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(255, 20, 20))),
+                _ => Some(iced::Background::Color(Color::from_rgb8(180, 0, 0))),
+            },
+            text_color: Color::WHITE,
+            border: iced::Border {
+                color: Color::from_rgb8(255, 60, 60),
+                width: 2.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
         .on_press(Message::KillSwitchClicked)
         .padding(15);
 
@@ -903,7 +999,16 @@ impl MercuryApp {
             ]
             .spacing(15)
         )
-        .padding(10)
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(20, 20, 25))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding(15)
         .width(Length::FillPortion(1))
         .height(Length::Fill);
 
@@ -921,7 +1026,17 @@ impl MercuryApp {
             ]
             .spacing(10)
         )
-        .padding(8);
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(10, 10, 12))),
+            border: iced::Border {
+                color: Color::from_rgb8(25, 25, 30),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        })
+        .padding(10)
+        .width(Length::Fill);
 
         // Assemble columns and return
         let view_content = column![
@@ -935,6 +1050,10 @@ impl MercuryApp {
         .spacing(5);
 
         container(view_content)
+            .style(move |_theme| container::Style {
+                background: Some(iced::Background::Color(Color::from_rgb8(10, 10, 12))),
+                ..Default::default()
+            })
             .width(Length::Fill)
             .height(Length::Fill)
             .into()
