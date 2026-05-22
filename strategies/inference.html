@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "navy";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-dec1bb0e.js";
+            window.path_to_searchindex_js = "../searchindex-b50e97f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-bf1706a4.js"></script>
+        <script src="../toc-76c8cb0b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -181,31 +181,92 @@
                 <div id="mdbook-content" class="content">
                     <main>
                         <h1 id="ml-inference-strategy"><a class="header" href="#ml-inference-strategy">ML Inference Strategy</a></h1>
-<p><code>InferenceStrategy</code> runs a trained ONNX model to generate trade signals.</p>
+<p><code>InferenceStrategy</code> generates buy/sell signals from a 12-feature order-book vector using either a pre-trained ONNX model or an online Adam-SGD classifier that trains itself in real-time.</p>
 <h2 id="how-it-works"><a class="header" href="#how-it-works">How it works</a></h2>
 <ol>
-<li>On each <code>on_book</code> call, compute a feature vector from recent order-book snapshots (bid/ask spread, volume imbalance, mid-price returns, etc.).</li>
-<li>Pass the feature vector through the ONNX model via <code>tract-onnx</code>.</li>
-<li>Interpret the model output as a directional probability; emit buy/sell signals when the probability exceeds a threshold.</li>
-<li>Fall back to an online logistic regression model when no ONNX file is provided.</li>
+<li>On every <code>on_book</code> call, <code>FeatureComputer</code> builds a 12-element feature vector from the current book snapshot and recent trade history.</li>
+<li><code>RunningNormalizer</code> standardises the vector to approximately zero mean / unit variance (active after a 30-tick warm-up; raw features are used before that).</li>
+<li>The normalised vector is either:
+<ul>
+<li><strong>ONNX path</strong> — fed to a <code>tract-onnx</code> plan loaded from disk.</li>
+<li><strong>Online fallback</strong> — classified by an incremental 3-class softmax trained with Adam via delayed self-labelling (label assigned after <code>lookahead_ticks</code> ticks using mid-price movement).</li>
+</ul>
+</li>
+<li><code>[sell_prob, hold_prob, buy_prob]</code> drives a threshold gate (0.65 for ONNX, 0.60 for online); a signal is emitted only when one class exceeds the threshold.</li>
 </ol>
-<h2 id="loading-a-model"><a class="header" href="#loading-a-model">Loading a model</a></h2>
+<h2 id="feature-vector-12-features"><a class="header" href="#feature-vector-12-features">Feature vector (12 features)</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Index</th><th>Feature</th><th>Range</th></tr>
+</thead>
+<tbody>
+<tr><td>0</td><td>Order imbalance <code>(bid_qty − ask_qty) / total</code></td><td>[−1, 1]</td></tr>
+<tr><td>1</td><td>Spread bps / 100</td><td>[0, ∞)</td></tr>
+<tr><td>2</td><td>RSI-14 / 100</td><td>[0, 1]</td></tr>
+<tr><td>3</td><td>MACD histogram (sign × clamped magnitude)</td><td>[−1, 1]</td></tr>
+<tr><td>4</td><td>Depth ratio top-5 bid / total</td><td>[0, 1]</td></tr>
+<tr><td>5</td><td>EMA-50 deviation <code>(mid − ema) / ema</code></td><td>uncapped</td></tr>
+<tr><td>6</td><td>ATR-14 / mid</td><td>[0, ∞)</td></tr>
+<tr><td>7</td><td>VWAP deviation, 100-trade rolling</td><td>uncapped</td></tr>
+<tr><td>8</td><td>Depth slope <code>(bid[0] − bid[4]) / mid</code></td><td>uncapped</td></tr>
+<tr><td>9</td><td>Trade-flow imbalance, 20-trade rolling</td><td>[0, 1]</td></tr>
+<tr><td>10</td><td>Kyle’s Lambda (tanh-squashed price-impact coeff)</td><td>(−1, 1)</td></tr>
+<tr><td>11</td><td>VPIN trade toxicity</td><td>[0, 1]</td></tr>
+</tbody>
+</table>
+</div>
+<p><code>compute_extended()</code> appends a 13th feature (index 12): Hawkes trade-arrival intensity.</p>
+<h2 id="online-normalisation"><a class="header" href="#online-normalisation">Online normalisation</a></h2>
+<p><code>RunningNormalizer</code> runs Welford’s one-pass algorithm to accumulate per-feature mean and variance. Features are normalised in-place before reaching the classifier:</p>
+<pre><code>z_i = (x_i − μ_i) / max(σ_i, 1e-8)
+</code></pre>
+<p>Normalisation activates after 30 observations. Before warm-up, raw features are used unchanged.</p>
+<h2 id="online-learning-no-onnx-model"><a class="header" href="#online-learning-no-onnx-model">Online learning (no ONNX model)</a></h2>
+<p>When no model file is supplied, the strategy trains an in-process softmax classifier with the <strong>Adam optimizer</strong> (β₁ = 0.9, β₂ = 0.999, ε = 1e-8, lr = 0.001, L2 = 1e-4):</p>
+<ul>
+<li>Each tick the feature vector is stored alongside the current mid price.</li>
+<li>After <code>lookahead_ticks</code> ticks, the mid-price change determines the label: <code>+1</code> (price rose &gt; threshold), <code>-1</code> (fell), <code>0</code> (flat).</li>
+<li>An Adam gradient step updates the 3-class weight matrix <code>(3 × 12)</code>.</li>
+<li>Signals are emitted only after <code>min_updates_before_signal</code> updates (default 25) to avoid noise during cold-start.</li>
+</ul>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let config = OnlineLearningConfig {
+    lookahead_ticks: 10,
+    threshold: 0.0005,           // 0.05% price move to assign a label
+    min_updates_before_signal: 25,
+    classifier: OnlineClassifierConfig {
+        learning_rate: 0.001,
+        l2: 0.0001,
+        beta1: 0.9,
+        beta2: 0.999,
+        epsilon: 1e-8,
+    },
+};
+let strat = InferenceStrategy::new("BTCUSDT", dec!(0.01), None, Some(bus))
+    .with_online_config(config);
+<span class="boring">}</span></code></pre>
+<h2 id="loading-an-onnx-model"><a class="header" href="#loading-an-onnx-model">Loading an ONNX model</a></h2>
 <pre><code class="language-bash">cargo run --bin mercury -- run \
   --symbol BTCUSDT \
   --paper \
   --strategy inference \
   --model path/to/model.onnx
 </code></pre>
-<h2 id="online-learning"><a class="header" href="#online-learning">Online learning</a></h2>
-<p>When running without a pre-trained model, <code>InferenceStrategy</code> uses incremental logistic regression that updates its weights after each fill. This allows the strategy to adapt to changing market conditions without retraining.</p>
-<h2 id="feature-set"><a class="header" href="#feature-set">Feature set</a></h2>
-<ul>
-<li>Mid-price returns (last 10 ticks)</li>
-<li>Bid/ask spread</li>
-<li>Volume imbalance <code>(bid_qty - ask_qty) / (bid_qty + ask_qty)</code></li>
-<li>LOB volume profile (top 5 levels each side)</li>
-<li>Volatility estimate (Parkinson)</li>
-</ul>
+<p>The expected ONNX input shape is <code>[1, 12]</code> with output shape <code>[1, 3]</code> (softmax over [SELL, HOLD, BUY]). A <code>[1, 2, 20]</code> LOB CNN model is also supported via <code>InferenceStrategy::new_lob_cnn</code>.</p>
+<h2 id="model-checkpointing"><a class="header" href="#model-checkpointing">Model checkpointing</a></h2>
+<p>Online classifier weights can be saved and restored between sessions:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Save after a live session
+clf.save("btcusdt_weights.json")?;
+
+// Restore at startup
+let mut clf = OnlineClassifier::new(OnlineClassifierConfig::default());
+clf.load("btcusdt_weights.json")?;
+<span class="boring">}</span></code></pre>
+<p>The checkpoint format is compact JSON containing <code>updates</code>, <code>bias[3]</code>, and <code>weights[36]</code> (3 classes × 12 features).</p>
 
                     </main>
 
@@ -215,7 +276,7 @@
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../strategies/custom.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../strategies/ml-components.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -229,7 +290,7 @@
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../strategies/custom.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../strategies/ml-components.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

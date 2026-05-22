@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "navy";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-dec1bb0e.js";
+            window.path_to_searchindex_js = "../searchindex-b50e97f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-bf1706a4.js"></script>
+        <script src="../toc-76c8cb0b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -193,6 +193,41 @@
 </ol>
 <h2 id="smart-order-routing"><a class="header" href="#smart-order-routing">Smart order routing</a></h2>
 <p><code>SmartOrderRouter</code> wraps multiple gateways and selects the venue with the best available price for the given symbol and side. It is opt-in; the default configuration uses a single gateway.</p>
+<h2 id="execution-algorithms"><a class="header" href="#execution-algorithms">Execution algorithms</a></h2>
+<p>Large parent orders can be worked using algorithmic executors. Each executor runs as a background <code>tokio</code> task and emits child <code>Signal</code> events onto the <code>EventBus</code>, which <code>OrderManager</code> receives and processes normally.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Executor</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>TwapExecutor</code></td><td>Splits a parent order into <code>N</code> equal-sized slices emitted at uniform time intervals (time-weighted average price).</td></tr>
+<tr><td><code>VwapExecutor</code></td><td>Sizes each slice in proportion to observed market trade volume for the interval; falls back to equal-weight when no volume is seen.</td></tr>
+<tr><td><code>PovExecutor</code></td><td>Participates as a configurable percentage of observed market volume, bounded by min/max slice sizes, with a wall-clock deadline that flushes any residual quantity.</td></tr>
+</tbody>
+</table>
+</div>
+<h3 id="usage"><a class="header" href="#usage">Usage</a></h3>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use mercury_execution::{TwapExecutor, VwapExecutor, PovExecutor};
+
+// TWAP — 10 equal slices over 5 minutes
+TwapExecutor::new(bus.clone()).execute(signal.clone(), 300, 10);
+
+// VWAP — 8 volume-proportional slices over 5 minutes
+VwapExecutor::new(bus.clone()).execute(signal.clone(), 300, 8);
+
+// POV — 10% participation, min 0.01 / max 1.0 per slice, 10-minute deadline
+PovExecutor::new(bus.clone()).execute(
+    signal,
+    0.10,                                    // participation_rate
+    FixedPoint::from_decimal(dec!(0.01)),    // min_slice_qty
+    FixedPoint::from_decimal(dec!(1.0)),     // max_slice_qty
+    600,                                     // deadline_secs
+);
+<span class="boring">}</span></code></pre>
+<p>All three executors observe <code>Trade</code> events on the <code>EventBus</code> to measure market volume. No additional configuration is required beyond passing the shared <code>Arc&lt;EventBus&gt;</code>.</p>
 
                     </main>
 

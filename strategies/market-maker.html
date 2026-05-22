@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "navy";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-dec1bb0e.js";
+            window.path_to_searchindex_js = "../searchindex-b50e97f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-bf1706a4.js"></script>
+        <script src="../toc-76c8cb0b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -185,8 +185,9 @@
 <h2 id="algorithm"><a class="header" href="#algorithm">Algorithm</a></h2>
 <ol>
 <li>Compute <code>mid = (best_bid + best_ask) / 2</code>.</li>
+<li>Feed the mid price into the <strong>HMM regime filter</strong> and apply a spread multiplier based on the detected regime.</li>
 <li>Apply inventory skew: if long, widen the ask and tighten the bid to mean-revert.</li>
-<li>Place a bid at <code>mid - spread/2</code> and an ask at <code>mid + spread/2</code>.</li>
+<li>Place a bid at <code>mid - half_spread</code> and an ask at <code>mid + half_spread</code>.</li>
 <li>On the next book update, cancel stale quotes and replace with fresh ones (peg mode reduces churn by only replacing when price moves beyond a threshold).</li>
 </ol>
 <h2 id="parameters"><a class="header" href="#parameters">Parameters</a></h2>
@@ -196,13 +197,46 @@
 <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>spread</code></td><td><code>dec!(0.002)</code></td><td>Total spread as a fraction of mid</td></tr>
+<tr><td><code>spread</code></td><td><code>dec!(0.002)</code></td><td>Base total spread as a fraction of mid</td></tr>
 <tr><td><code>order_qty</code></td><td><code>dec!(0.01)</code></td><td>Order size in base currency</td></tr>
 <tr><td><code>inventory_skew</code></td><td><code>dec!(0.5)</code></td><td>Multiplier for inventory-based skew</td></tr>
 <tr><td><code>peg_threshold</code></td><td><code>dec!(0.0005)</code></td><td>Min price move before requoting (peg mode)</td></tr>
 </tbody>
 </table>
 </div>
+<h2 id="regime-gated-spread-scaling"><a class="header" href="#regime-gated-spread-scaling">Regime-gated spread scaling</a></h2>
+<p><code>MarketMaker</code> embeds an <code>HmmFilter</code> (two-state hidden Markov model) that classifies the market into <code>Trending</code> or <code>MeanReverting</code> based on the sign persistence of consecutive log returns.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Regime</th><th>Spread multiplier</th><th>Rationale</th></tr>
+</thead>
+<tbody>
+<tr><td>Trending</td><td><strong>2.0×</strong></td><td>Informed directional flow → widen to reduce adverse selection</td></tr>
+<tr><td>MeanReverting</td><td><strong>0.75×</strong></td><td>Noise-driven oscillation → tighten to capture more fills</td></tr>
+<tr><td>Uncertain (&lt; 0.60 confidence)</td><td><strong>1.0×</strong></td><td>Default spread, no adjustment</td></tr>
+</tbody>
+</table>
+</div>
+<p>The HMM needs at least two price updates before emitting a confident regime. During warm-up the multiplier is 1.0.</p>
+<p>Customise via <code>RegimeConfig</code>:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use mercury_strategy::{MarketMaker, RegimeConfig, HmmConfig};
+
+let regime = RegimeConfig {
+    hmm: HmmConfig {
+        stay_probability: 0.95,
+        confidence_threshold: 0.65,  // require higher confidence before scaling
+        ..HmmConfig::default()
+    },
+    trending_spread_mult: 2.5,        // even wider in strong trends
+    mean_revert_spread_mult: 0.80,
+};
+
+let mm = MarketMaker::new("BTCUSDT", dec!(0.002), dec!(0.01))
+    .with_regime_config(regime);
+<span class="boring">}</span></code></pre>
 <h2 id="peg-mode"><a class="header" href="#peg-mode">Peg mode</a></h2>
 <p>Peg mode (enabled by default) avoids unnecessary cancel/replace cycles. A quote is only refreshed when the mid-price moves more than <code>peg_threshold</code> from the last quoted price. This reduces exchange fees and order rate usage.</p>
 

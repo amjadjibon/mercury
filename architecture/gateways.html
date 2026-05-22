@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "navy";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-dec1bb0e.js";
+            window.path_to_searchindex_js = "../searchindex-b50e97f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-bf1706a4.js"></script>
+        <script src="../toc-76c8cb0b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -205,6 +205,8 @@ pub trait ExchangeGateway: Send + Sync {
 <tr><td><code>BybitGateway</code></td><td>Bybit v5</td><td>HMAC-SHA256 signing</td></tr>
 <tr><td><code>KrakenGateway</code></td><td>Kraken v0</td><td>HMAC-SHA512 with nonce</td></tr>
 <tr><td><code>OkxGateway</code></td><td>OKX v5</td><td>HMAC-SHA256, base64</td></tr>
+<tr><td><code>PolymarketGateway</code></td><td>Polymarket CLOB</td><td>HMAC-SHA256; fills via WebSocket user channel</td></tr>
+<tr><td><code>KalshiGateway</code></td><td>Kalshi v2</td><td>RSA-SHA256 private key signing</td></tr>
 <tr><td><code>PaperGateway</code></td><td>—</td><td>Local simulated matching</td></tr>
 </tbody>
 </table>
@@ -226,7 +228,7 @@ pub trait ExchangeGateway: Send + Sync {
 <li>Create <code>crates/gateway/src/myexchange.rs</code></li>
 <li>Implement <code>ExchangeGateway</code></li>
 <li>Add the variant to <code>Exchange</code> enum in <code>mercury-core</code></li>
-<li>Register in <code>crates/cli/src/run.rs</code></li>
+<li>Register in <code>crates/cli/src/main.rs</code> (gateway match and feed_manager match)</li>
 </ol>
 
                     </main>

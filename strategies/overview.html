@@ -35,10 +35,10 @@
             const path_to_root = "../";
             const default_light_theme = "navy";
             const default_dark_theme = "ayu";
-            window.path_to_searchindex_js = "../searchindex-dec1bb0e.js";
+            window.path_to_searchindex_js = "../searchindex-b50e97f3.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc-bf1706a4.js"></script>
+        <script src="../toc-76c8cb0b.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -206,11 +206,12 @@
 <tr><th>Name</th><th>Flag</th><th>Description</th></tr>
 </thead>
 <tbody>
-<tr><td><code>MarketMaker</code></td><td><code>market_maker</code></td><td>Symmetric quotes around mid with inventory skew</td></tr>
+<tr><td><code>MarketMaker</code></td><td><code>market_maker</code></td><td>Symmetric quotes with inventory skew and HMM regime gating (2× spread when trending, 0.75× when mean-reverting)</td></tr>
 <tr><td><code>Momentum</code></td><td><code>momentum</code></td><td>Trend-following using EMA crossover</td></tr>
 <tr><td><code>RsiStrategy</code></td><td><code>rsi</code></td><td>Mean-reversion using RSI overbought/oversold</td></tr>
 <tr><td><code>ArbitrageStrategy</code></td><td><code>arbitrage</code></td><td>Cross-exchange price discrepancy</td></tr>
-<tr><td><code>InferenceStrategy</code></td><td><code>inference</code></td><td>ONNX model inference</td></tr>
+<tr><td><code>InferenceStrategy</code></td><td><code>inference</code></td><td>ONNX or online Adam-SGD classifier on 12-feature vector with Welford z-score normalisation</td></tr>
+<tr><td><code>RlQuotePlacementStrategy</code></td><td><code>rl</code></td><td>DQN quote placement; 7-state input adds HMM trend probability alongside 6 market features</td></tr>
 </tbody>
 </table>
 </div>
@@ -227,7 +228,7 @@
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../architecture/tui.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../architecture/gui.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
@@ -241,7 +242,7 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../architecture/tui.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../architecture/gui.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
