@@ -13,6 +13,65 @@ use std::collections::VecDeque;
 
 /// Number of features in the output vector.
 pub const FEATURE_COUNT: usize = 10;
+
+/// Online z-score normalizer using Welford's one-pass algorithm.
+///
+/// Maintains running mean and variance for each feature dimension.
+/// After `min_count` observations the output is standardized to
+/// approximately zero mean and unit variance.
+#[derive(Debug, Clone)]
+pub struct RunningNormalizer {
+    mean: [f64; FEATURE_COUNT],
+    m2: [f64; FEATURE_COUNT],
+    count: u64,
+    /// Minimum observations before normalization is applied; outputs are
+    /// returned unchanged until this threshold is reached.
+    min_count: u64,
+}
+
+impl RunningNormalizer {
+    pub fn new(min_count: u64) -> Self {
+        Self {
+            mean: [0.0; FEATURE_COUNT],
+            m2: [0.0; FEATURE_COUNT],
+            count: 0,
+            min_count,
+        }
+    }
+
+    /// Update running statistics and normalize `features` in-place.
+    /// No-op until `min_count` observations have been seen.
+    pub fn update_and_normalize(&mut self, features: &mut [f32; FEATURE_COUNT]) {
+        self.count += 1;
+        // Welford online update.
+        for (i, &x) in features.iter().enumerate() {
+            let x64 = x as f64;
+            let delta = x64 - self.mean[i];
+            self.mean[i] += delta / self.count as f64;
+            let delta2 = x64 - self.mean[i];
+            self.m2[i] += delta * delta2;
+        }
+        if self.count < self.min_count {
+            return;
+        }
+        for i in 0..FEATURE_COUNT {
+            let var = self.m2[i] / self.count as f64;
+            let std = var.sqrt().max(1e-8);
+            features[i] = ((features[i] as f64 - self.mean[i]) / std) as f32;
+        }
+    }
+
+    /// Whether normalization is active (enough observations collected).
+    pub fn is_warm(&self) -> bool {
+        self.count >= self.min_count
+    }
+
+    pub fn reset(&mut self) {
+        self.mean = [0.0; FEATURE_COUNT];
+        self.m2 = [0.0; FEATURE_COUNT];
+        self.count = 0;
+    }
+}
 /// Number of features when including Hawkes trade-arrival intensity.
 pub const EXTENDED_FEATURE_COUNT: usize = 11;
 /// Bid and ask channels in the LOB CNN input.

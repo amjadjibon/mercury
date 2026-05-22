@@ -9,6 +9,7 @@
 //! - κ (order_rate):    proxy for order-arrival depth; higher = tighter spread
 //! - min_spread_bps:    floor on the half-spread regardless of model output
 
+use crate::regime::{HmmFilter, RegimeConfig, Regime};
 use crate::traits::Strategy;
 use crate::volatility::VolatilityEstimator;
 use mercury_core::{
@@ -55,6 +56,10 @@ pub struct MarketMaker {
     peg_last_best_bid: Option<FixedPoint>,
     /// Last best-ask price emitted in peg mode.
     peg_last_best_ask: Option<FixedPoint>,
+    /// HMM-based regime filter — widens spread in trending markets, tightens in mean-reverting.
+    hmm: HmmFilter,
+    /// Regime spread scaling factors.
+    regime_config: RegimeConfig,
 }
 
 impl MarketMaker {
@@ -82,7 +87,16 @@ impl MarketMaker {
             peg_mode: false,
             peg_last_best_bid: None,
             peg_last_best_ask: None,
+            hmm: HmmFilter::default(),
+            regime_config: RegimeConfig::default(),
         }
+    }
+
+    /// Override regime detection configuration.
+    pub fn with_regime_config(mut self, config: RegimeConfig) -> Self {
+        self.hmm = HmmFilter::new(config.hmm);
+        self.regime_config = config;
+        self
     }
 
     /// Override risk-aversion γ (default 0.1).
@@ -290,8 +304,22 @@ impl Strategy for MarketMaker {
             return vec![];
         }
 
+        // Feed HMM regime filter and scale spread accordingly.
+        if let Some(mid_f64) = mid.to_string().parse::<f64>().ok() {
+            self.hmm.update_price(mid_f64);
+        }
+        let regime_mult = match self.hmm.regime() {
+            Some(Regime::Trending) => Decimal::from_str_exact(
+                &format!("{:.6}", self.regime_config.trending_spread_mult),
+            ).unwrap_or(Decimal::TWO),
+            Some(Regime::MeanReverting) => Decimal::from_str_exact(
+                &format!("{:.6}", self.regime_config.mean_revert_spread_mult),
+            ).unwrap_or(dec!(0.75)),
+            None => Decimal::ONE,
+        };
+
         let r = self.reservation_price(mid) - self.risk_inventory_shift(book.symbol, mid);
-        let delta = self.half_spread(mid);
+        let delta = self.half_spread(mid) * regime_mult;
 
         let bid_price = r - delta;
         let ask_price = r + delta;
@@ -344,6 +372,7 @@ impl Strategy for MarketMaker {
         self.vol_estimator.reset();
         self.peg_last_best_bid = None;
         self.peg_last_best_ask = None;
+        self.hmm.reset();
     }
 }
 

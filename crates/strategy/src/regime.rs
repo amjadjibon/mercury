@@ -163,6 +163,29 @@ impl Default for HmmFilter {
     }
 }
 
+/// Strategy-level regime configuration.
+///
+/// Consumed by `MarketMaker` (and other strategies) to scale spread width
+/// based on the current inferred market regime.
+#[derive(Debug, Clone, Copy)]
+pub struct RegimeConfig {
+    pub hmm: HmmConfig,
+    /// Spread multiplier when regime is `Trending` (default 2.0 — widen spread).
+    pub trending_spread_mult: f64,
+    /// Spread multiplier when regime is `MeanReverting` (default 0.75 — tighten spread).
+    pub mean_revert_spread_mult: f64,
+}
+
+impl Default for RegimeConfig {
+    fn default() -> Self {
+        Self {
+            hmm: HmmConfig::default(),
+            trending_spread_mult: 2.0,
+            mean_revert_spread_mult: 0.75,
+        }
+    }
+}
+
 fn gaussian_likelihood(x: f64, mean: f64, sigma: f64) -> f64 {
     let z = (x - mean) / sigma;
     (-0.5 * z * z).exp()

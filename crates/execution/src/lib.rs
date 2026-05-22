@@ -1,5 +1,6 @@
 //! Mercury Execution - Order lifecycle management.
 
+pub mod adaptive_executor;
 pub mod backtest;
 pub mod metrics;
 pub mod order_manager;
@@ -10,6 +11,7 @@ pub mod router;
 pub mod twap;
 pub mod vwap;
 
+pub use adaptive_executor::{AdaptiveExecutor, AdaptiveMode, AdaptiveParamModel, ADAPTIVE_FEATURE_DIM};
 pub use backtest::{BacktestResult, SimulatedExchange};
 pub use order_manager::OrderManager;
 pub use pov::PovExecutor;

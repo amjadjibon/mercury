@@ -29,28 +29,45 @@ pub enum InferenceInputMode {
     LobCnn,
 }
 
-/// SGD settings for the online softmax classifier.
+/// Adam optimizer settings for the online softmax classifier.
 #[derive(Debug, Clone, Copy)]
 pub struct OnlineClassifierConfig {
     pub learning_rate: f32,
     pub l2: f32,
+    /// Adam β₁ — first-moment decay (default 0.9).
+    pub beta1: f32,
+    /// Adam β₂ — second-moment decay (default 0.999).
+    pub beta2: f32,
+    /// Adam ε — numerical stability constant (default 1e-8).
+    pub epsilon: f32,
 }
 
 impl Default for OnlineClassifierConfig {
     fn default() -> Self {
         Self {
-            learning_rate: 0.05,
+            learning_rate: 0.001,
             l2: 0.0001,
+            beta1: 0.9,
+            beta2: 0.999,
+            epsilon: 1e-8,
         }
     }
 }
 
-/// Incremental 3-class softmax logistic regression over `FEATURE_COUNT` inputs.
+/// Incremental 3-class softmax logistic regression with Adam optimizer.
 #[derive(Debug, Clone)]
 pub struct OnlineClassifier {
     config: OnlineClassifierConfig,
     weights: [[f32; FEATURE_COUNT]; 3],
     bias: [f32; 3],
+    /// Adam first moment (weights).
+    m_w: [[f32; FEATURE_COUNT]; 3],
+    /// Adam second moment (weights).
+    v_w: [[f32; FEATURE_COUNT]; 3],
+    /// Adam first moment (bias).
+    m_b: [f32; 3],
+    /// Adam second moment (bias).
+    v_b: [f32; 3],
     updates: u64,
 }
 
@@ -58,10 +75,16 @@ impl OnlineClassifier {
     pub fn new(config: OnlineClassifierConfig) -> Self {
         assert!(config.learning_rate > 0.0, "learning_rate must be positive");
         assert!(config.l2 >= 0.0, "l2 must be non-negative");
+        assert!(config.beta1 > 0.0 && config.beta1 < 1.0, "beta1 must be in (0,1)");
+        assert!(config.beta2 > 0.0 && config.beta2 < 1.0, "beta2 must be in (0,1)");
         Self {
             config,
             weights: [[0.0; FEATURE_COUNT]; 3],
             bias: [0.0; 3],
+            m_w: [[0.0; FEATURE_COUNT]; 3],
+            v_w: [[0.0; FEATURE_COUNT]; 3],
+            m_b: [0.0; 3],
+            v_b: [0.0; 3],
             updates: 0,
         }
     }
@@ -80,17 +103,34 @@ impl OnlineClassifier {
         let target = label_index(label);
         let probs = self.predict(features);
 
+        self.updates += 1;
+        let t = self.updates as f32;
+        let b1 = self.config.beta1;
+        let b2 = self.config.beta2;
+        let eps = self.config.epsilon;
+        let lr = self.config.learning_rate;
+        // Bias correction factors.
+        let alpha_t = lr * (1.0 - b2.powf(t)).sqrt() / (1.0 - b1.powf(t));
+
         for class in 0..3 {
             let y = if class == target { 1.0 } else { 0.0 };
             let err = probs[class] - y;
-            for (idx, feature) in features.iter().copied().enumerate() {
-                let reg = self.config.l2 * self.weights[class][idx];
-                self.weights[class][idx] -= self.config.learning_rate * (err * feature + reg);
+
+            // Weight Adam update.
+            for idx in 0..FEATURE_COUNT {
+                let g = err * features[idx] + self.config.l2 * self.weights[class][idx];
+                self.m_w[class][idx] = b1 * self.m_w[class][idx] + (1.0 - b1) * g;
+                self.v_w[class][idx] = b2 * self.v_w[class][idx] + (1.0 - b2) * g * g;
+                self.weights[class][idx] -= alpha_t * self.m_w[class][idx]
+                    / (self.v_w[class][idx].sqrt() + eps);
             }
-            self.bias[class] -= self.config.learning_rate * err;
+
+            // Bias Adam update.
+            self.m_b[class] = b1 * self.m_b[class] + (1.0 - b1) * err;
+            self.v_b[class] = b2 * self.v_b[class] + (1.0 - b2) * err * err;
+            self.bias[class] -= alpha_t * self.m_b[class] / (self.v_b[class].sqrt() + eps);
         }
 
-        self.updates += 1;
         probs
     }
 
@@ -98,9 +138,35 @@ impl OnlineClassifier {
         self.updates
     }
 
+    // ── Checkpoint accessors ──────────────────────────────────────────────────
+
+    pub fn weights(&self) -> &[[f32; FEATURE_COUNT]; 3] {
+        &self.weights
+    }
+
+    pub fn weights_mut(&mut self) -> &mut [[f32; FEATURE_COUNT]; 3] {
+        &mut self.weights
+    }
+
+    pub fn bias(&self) -> &[f32; 3] {
+        &self.bias
+    }
+
+    pub fn bias_mut(&mut self) -> &mut [f32; 3] {
+        &mut self.bias
+    }
+
+    pub fn updates_mut(&mut self) -> &mut u64 {
+        &mut self.updates
+    }
+
     pub fn reset(&mut self) {
         self.weights = [[0.0; FEATURE_COUNT]; 3];
         self.bias = [0.0; 3];
+        self.m_w = [[0.0; FEATURE_COUNT]; 3];
+        self.v_w = [[0.0; FEATURE_COUNT]; 3];
+        self.m_b = [0.0; 3];
+        self.v_b = [0.0; 3];
         self.updates = 0;
     }
 }
@@ -455,22 +521,23 @@ mod tests {
     #[test]
     fn test_online_classifier_learns_buy_label() {
         let mut classifier = OnlineClassifier::new(OnlineClassifierConfig {
-            learning_rate: 0.2,
+            learning_rate: 0.01,
             l2: 0.0,
+            ..OnlineClassifierConfig::default()
         });
         let mut feats = [0.0f32; FEATURE_COUNT];
         feats[0] = 1.0;
         feats[4] = 1.0;
 
         let before = classifier.predict(feats);
-        for _ in 0..40 {
+        for _ in 0..200 {
             classifier.update(feats, 1);
         }
         let after = classifier.predict(feats);
 
         assert!(after[2] > before[2]);
-        assert!(after[2] > 0.8, "buy prob = {}", after[2]);
-        assert_eq!(classifier.updates(), 40);
+        assert!(after[2] > 0.7, "buy prob = {}", after[2]);
+        assert_eq!(classifier.updates(), 200);
     }
 
     #[test]
@@ -481,8 +548,9 @@ mod tests {
             threshold: 0.0,
             min_updates_before_signal: 2,
             classifier: OnlineClassifierConfig {
-                learning_rate: 0.3,
+                learning_rate: 0.01,
                 l2: 0.0,
+                ..OnlineClassifierConfig::default()
             },
         };
         let mut strat =
