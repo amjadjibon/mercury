@@ -1,4 +1,4 @@
-use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Fill};
+use iced::widget::canvas::{self, Frame, Geometry, Path, Stroke, Fill, Text};
 use iced::{Rectangle, Point, Color, Theme, Renderer};
 use std::collections::VecDeque;
 
@@ -70,6 +70,43 @@ impl<Message> canvas::Program<Message> for Sparkline {
             // 15% top/bottom padding
             bounds.height - 5.0 - (ratio * (bounds.height - 10.0))
         };
+
+        // Draw Latency Scale Tick labels
+        let label_color = Color::from_rgba8(0, 240, 200, 0.35);
+        let text_size = 9.0;
+
+        // Max latency label
+        frame.fill_text(Text {
+            content: format!("max: {:.1} μs", max_val),
+            position: Point::new(10.0, 12.0),
+            color: label_color,
+            size: text_size.into(),
+            align_x: iced::alignment::Horizontal::Left.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
+
+        // Median latency label
+        frame.fill_text(Text {
+            content: format!("mid: {:.1} μs", min_val + range / 2.0),
+            position: Point::new(10.0, bounds.height / 2.0),
+            color: Color::from_rgba8(255, 255, 255, 0.2),
+            size: text_size.into(),
+            align_x: iced::alignment::Horizontal::Left.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
+
+        // Min latency label
+        frame.fill_text(Text {
+            content: format!("min: {:.1} μs", min_val),
+            position: Point::new(10.0, bounds.height - 12.0),
+            color: Color::from_rgba8(255, 60, 120, 0.35),
+            size: text_size.into(),
+            align_x: iced::alignment::Horizontal::Left.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
 
         // Draw glowing line
         let path = Path::new(|builder| {

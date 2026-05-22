@@ -100,6 +100,75 @@ impl<Message> canvas::Program<Message> for DepthMap {
         };
         let mid_x = scale_x(mid_price);
 
+        // Draw Price labels along the bottom edge
+        let price_color = Color::from_rgba8(255, 255, 255, 0.4);
+        let price_size = 10.0;
+
+        // Min price (left)
+        frame.fill_text(Text {
+            content: format!("{:.2}", min_price),
+            position: Point::new(10.0, bounds.height - 18.0),
+            color: price_color,
+            size: price_size.into(),
+            align_x: iced::alignment::Horizontal::Left.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
+
+        // Mid price (center)
+        frame.fill_text(Text {
+            content: format!("Mid: {:.2}", mid_price),
+            position: Point::new(mid_x, bounds.height - 18.0),
+            color: price_color,
+            size: price_size.into(),
+            align_x: iced::alignment::Horizontal::Center.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
+
+        // Max price (right)
+        frame.fill_text(Text {
+            content: format!("{:.2}", max_price),
+            position: Point::new(bounds.width - 10.0, bounds.height - 18.0),
+            color: price_color,
+            size: price_size.into(),
+            align_x: iced::alignment::Horizontal::Right.into(),
+            align_y: iced::alignment::Vertical::Center.into(),
+            ..Default::default()
+        });
+
+        // Draw Volume levels for horizontal grid lines
+        for i in 1..4 {
+            let y = bounds.height * (i as f32) / 4.0;
+            // Calculate corresponding volume value at this height y
+            let volume_at_y = max_volume * ((bounds.height - y) as f64) / (bounds.height as f64 * 0.9);
+            if volume_at_y >= 0.0 {
+                frame.fill_text(Text {
+                    content: format!("{:.1}", volume_at_y),
+                    position: Point::new(10.0, y - 8.0),
+                    color: Color::from_rgba8(255, 255, 255, 0.25),
+                    size: 9.0.into(),
+                    align_x: iced::alignment::Horizontal::Left.into(),
+                    align_y: iced::alignment::Vertical::Center.into(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        // Draw Spread label in upper middle
+        if !self.bids.is_empty() && !self.asks.is_empty() {
+            let spread = self.asks[0].0 - self.bids[0].0;
+            frame.fill_text(Text {
+                content: format!("Spread: {:.2}", spread),
+                position: Point::new(mid_x, 15.0),
+                color: Color::from_rgb8(255, 60, 120), // neon pink
+                size: 11.0.into(),
+                align_x: iced::alignment::Horizontal::Center.into(),
+                align_y: iced::alignment::Vertical::Center.into(),
+                ..Default::default()
+            });
+        }
+
         // 2. Draw Bid Depth (Left side - Neon Green/Teal)
         if !cum_bids.is_empty() {
             let bid_path = Path::new(|builder| {

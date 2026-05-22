@@ -466,67 +466,229 @@ impl MercuryApp {
         let theme_text_pink = Color::from_rgb8(255, 60, 120);
         let theme_gray = Color::from_rgb8(150, 150, 155);
 
-        // 1. TOP HEADER PANEL
-        let header = container(
-            row![
+        // 1. TOP HEADER PANEL (PREMIUM METRICS TICKER CARD DECK)
+        let current_pos = self.active_positions.iter().find(|p| p.symbol == self.symbol);
+        let current_size = current_pos.map(|p| p.size).unwrap_or(0.0);
+        let total_pnl: f64 = self.active_positions.iter().map(|p| p.pnl).sum();
+
+        let logo_card = container(
+            column![
                 text("MERCURY")
-                    .size(24)
+                    .size(20)
                     .font(Font { weight: font::Weight::Bold, ..Font::default() })
-                    .color(theme_text_teal)
-                    .width(Length::FillPortion(1)),
+                    .color(theme_text_teal),
+                text("HFT ENGINE v1.0.0")
+                    .size(8)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
+            ]
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let symbol_card = container(
+            column![
+                text("ACTIVE SYMBOL")
+                    .size(9)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
+                text(&self.symbol)
+                    .size(14)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(Color::WHITE),
+            ]
+            .spacing(2)
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let status_color = if self.is_connected { theme_text_teal } else { theme_text_pink };
+        let state_card = container(
+            column![
+                text("SYSTEM STATUS")
+                    .size(9)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
                 row![
-                    text("SYMBOL: ")
-                        .size(14)
-                        .color(theme_gray),
-                    text(&self.symbol)
-                        .size(16)
-                        .font(Font { weight: font::Weight::Bold, ..Font::default() }),
-                ]
-                .spacing(5)
-                .width(Length::FillPortion(1)),
-                row![
-                    text("STATE: ")
-                        .size(14)
-                        .color(theme_gray),
-                    text(if self.is_connected { "LIVE" } else { "OFFLINE" })
-                        .size(16)
+                    container(column![])
+                        .width(6)
+                        .height(6)
+                        .style(move |_theme| container::Style {
+                            background: Some(iced::Background::Color(status_color)),
+                            border: iced::Border {
+                                color: status_color,
+                                width: 0.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        }),
+                    text(if self.is_connected { "LIVE / ACTIVE" } else { "DISCONNECTED" })
+                        .size(13)
                         .font(Font { weight: font::Weight::Bold, ..Font::default() })
-                        .color(if self.is_connected { theme_text_teal } else { theme_text_pink }),
+                        .color(status_color),
                 ]
-                .spacing(5)
-                .width(Length::FillPortion(1)),
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+            ]
+            .spacing(2)
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let pos_color = if current_size > 0.0 {
+            theme_text_teal
+        } else if current_size < 0.0 {
+            theme_text_pink
+        } else {
+            theme_gray
+        };
+        let pos_sign = if current_size > 0.0 { "+" } else { "" };
+        let pos_card = container(
+            column![
+                text("NET POSITION")
+                    .size(9)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
+                text(format!("{}{:.3} BTC", pos_sign, current_size))
+                    .size(14)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(pos_color),
+            ]
+            .spacing(2)
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let pnl_color = if total_pnl > 0.0 {
+            theme_text_teal
+        } else if total_pnl < 0.0 {
+            theme_text_pink
+        } else {
+            theme_gray
+        };
+        let pnl_sign = if total_pnl > 0.0 { "+" } else { "" };
+        let pnl_card = container(
+            column![
+                text("UNREALIZED PnL")
+                    .size(9)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
+                text(format!("{}{:.2} USD", pnl_sign, total_pnl))
+                    .size(14)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(pnl_color),
+            ]
+            .spacing(2)
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let spread = (self.best_ask - self.best_bid).max(0.0);
+        let spread_pct = if self.best_bid > 0.0 {
+            (spread / self.best_bid) * 100.0
+        } else {
+            0.0
+        };
+        let spread_card = container(
+            column![
+                text("BID / ASK (SPREAD)")
+                    .size(9)
+                    .font(Font { weight: font::Weight::Bold, ..Font::default() })
+                    .color(theme_gray),
                 row![
-                    text("BEST BID: ")
-                        .size(14)
-                        .color(theme_gray),
                     text(format!("{:.2}", self.best_bid))
-                        .size(16)
+                        .size(13)
                         .font(Font { weight: font::Weight::Bold, ..Font::default() })
                         .color(theme_text_teal),
-                    text(" | BEST ASK: ")
-                        .size(14)
+                    text(" / ")
+                        .size(13)
                         .color(theme_gray),
                     text(format!("{:.2}", self.best_ask))
-                        .size(16)
+                        .size(13)
                         .font(Font { weight: font::Weight::Bold, ..Font::default() })
                         .color(theme_text_pink),
+                    text(format!(" ({:.2}%)", spread_pct))
+                        .size(11)
+                        .color(theme_gray),
                 ]
                 .spacing(5)
-                .width(Length::FillPortion(2)),
+                .align_y(iced::Alignment::Center)
             ]
-            .spacing(20)
+            .spacing(2)
+        )
+        .padding([8, 12])
+        .style(move |_theme| container::Style {
+            background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+            border: iced::Border {
+                color: Color::from_rgb8(35, 35, 40),
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        });
+
+        let header = container(
+            row![
+                logo_card,
+                symbol_card.width(Length::FillPortion(1)),
+                state_card.width(Length::FillPortion(1)),
+                pos_card.width(Length::FillPortion(1)),
+                pnl_card.width(Length::FillPortion(1)),
+                spread_card.width(Length::FillPortion(2)),
+            ]
+            .spacing(12)
             .align_y(iced::Alignment::Center)
         )
         .style(move |_theme| container::Style {
-            background: Some(iced::Background::Color(Color::from_rgb8(20, 20, 25))),
+            background: Some(iced::Background::Color(Color::from_rgb8(15, 15, 18))),
             border: iced::Border {
-                color: Color::from_rgb8(35, 35, 40),
+                color: Color::from_rgb8(30, 30, 35),
                 width: 1.0,
                 radius: 6.0.into(),
             },
             ..Default::default()
         })
-        .padding(15)
+        .padding(12)
         .width(Length::Fill);
 
         // 2. MAIN OBSIDIAN BODY (3 PANELS GRID)
@@ -645,31 +807,63 @@ impl MercuryApp {
 
         let (trades_tab_btn, logs_tab_btn) = if !self.show_logs_tab {
             (
-                trades_tab_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                trades_tab_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                    },
                     text_color: theme_text_teal,
                     border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
                     ..Default::default()
                 }),
-                logs_tab_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
-                    text_color: theme_gray,
-                    border: iced::Border { color: Color::from_rgb8(40, 40, 45), width: 1.0, radius: 4.0.into() },
+                logs_tab_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                    },
+                    text_color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_pink,
+                        _ => theme_gray,
+                    },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => theme_text_pink,
+                            _ => Color::from_rgb8(40, 40, 45),
+                        },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::ToggleMiddleTab(true))
             )
         } else {
             (
-                trades_tab_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
-                    text_color: theme_gray,
-                    border: iced::Border { color: Color::from_rgb8(40, 40, 45), width: 1.0, radius: 4.0.into() },
+                trades_tab_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                    },
+                    text_color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => theme_gray,
+                    },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => theme_text_teal,
+                            _ => Color::from_rgb8(40, 40, 45),
+                        },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::ToggleMiddleTab(false)),
-                logs_tab_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                logs_tab_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                    },
                     text_color: theme_text_teal,
                     border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
                     ..Default::default()
@@ -774,7 +968,23 @@ impl MercuryApp {
 
         let price_input = text_input("Limit Price (Optional)", &self.manual_price)
             .on_input(Message::PriceChanged)
-            .padding(8);
+            .padding(8)
+            .style(move |_theme, status| text_input::Style {
+                background: iced::Background::Color(Color::from_rgb8(15, 15, 20)),
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::text_input::Status::Focused { .. } => theme_text_teal,
+                        iced::widget::text_input::Status::Hovered => Color::from_rgb8(70, 70, 75),
+                        _ => Color::from_rgb8(45, 45, 50),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                placeholder: Color::from_rgb8(100, 100, 105),
+                value: Color::WHITE,
+                selection: Color::from_rgba8(0, 240, 200, 0.2),
+                icon: Color::from_rgb8(150, 150, 150),
+            });
 
         let buy_btn = button(
             text("BUY / LONG")
@@ -789,7 +999,10 @@ impl MercuryApp {
             },
             text_color: Color::BLACK,
             border: iced::Border {
-                color: theme_text_teal,
+                color: match status {
+                    iced::widget::button::Status::Hovered => Color::from_rgb8(150, 255, 230),
+                    _ => theme_text_teal,
+                },
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -811,7 +1024,10 @@ impl MercuryApp {
             },
             text_color: Color::WHITE,
             border: iced::Border {
-                color: theme_text_pink,
+                color: match status {
+                    iced::widget::button::Status::Hovered => Color::from_rgb8(255, 150, 180),
+                    _ => theme_text_pink,
+                },
                 width: 1.0,
                 radius: 4.0.into(),
             },
@@ -840,7 +1056,23 @@ impl MercuryApp {
         // Engine settings & buttons
         let symbol_input = text_input("Symbol (e.g. BTCUSDT)", &self.engine_symbol)
             .on_input(Message::EngineSymbolChanged)
-            .padding(6);
+            .padding(6)
+            .style(move |_theme, status| text_input::Style {
+                background: iced::Background::Color(Color::from_rgb8(15, 15, 20)),
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::text_input::Status::Focused { .. } => theme_text_teal,
+                        iced::widget::text_input::Status::Hovered => Color::from_rgb8(70, 70, 75),
+                        _ => Color::from_rgb8(45, 45, 50),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                placeholder: Color::from_rgb8(100, 100, 105),
+                value: Color::WHITE,
+                selection: Color::from_rgba8(0, 240, 200, 0.2),
+                icon: Color::from_rgb8(150, 150, 150),
+            });
 
         // Cyberpunk strategy chips
         let strategies = vec!["rsi", "market_maker", "momentum", "arbitrage", "inference"];
@@ -859,8 +1091,11 @@ impl MercuryApp {
             let mut btn = button(text(strat_label).size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }));
             
             if is_selected {
-                btn = btn.style(move |_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(theme_text_teal)),
+                btn = btn.style(move |_theme, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(0, 200, 160))),
+                        _ => Some(iced::Background::Color(theme_text_teal)),
+                    },
                     text_color: Color::BLACK,
                     border: iced::Border {
                         color: theme_text_teal,
@@ -871,11 +1106,20 @@ impl MercuryApp {
                     ..Default::default()
                 });
             } else {
-                btn = btn.style(move |_theme, _status| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
-                    text_color: theme_gray,
+                btn = btn.style(move |_theme, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                    },
+                    text_color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => theme_gray,
+                    },
                     border: iced::Border {
-                        color: Color::from_rgb8(50, 50, 55),
+                        color: match status {
+                            iced::widget::button::Status::Hovered => theme_text_teal,
+                            _ => Color::from_rgb8(50, 50, 55),
+                        },
                         width: 1.0,
                         radius: 4.0.into(),
                     },
@@ -895,31 +1139,63 @@ impl MercuryApp {
             
         let (paper_btn, live_btn) = if self.engine_paper {
             (
-                paper_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(theme_text_teal)),
+                paper_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(0, 200, 160))),
+                        _ => Some(iced::Background::Color(theme_text_teal)),
+                    },
                     text_color: Color::BLACK,
                     border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
                     ..Default::default()
                 }),
-                live_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
-                    text_color: theme_gray,
-                    border: iced::Border { color: Color::from_rgb8(50, 50, 55), width: 1.0, radius: 4.0.into() },
+                live_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                    },
+                    text_color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_pink,
+                        _ => theme_gray,
+                    },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => theme_text_pink,
+                            _ => Color::from_rgb8(50, 50, 55),
+                        },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::EnginePaperToggled)
             )
         } else {
             (
-                paper_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
-                    text_color: theme_gray,
-                    border: iced::Border { color: Color::from_rgb8(50, 50, 55), width: 1.0, radius: 4.0.into() },
+                paper_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                    },
+                    text_color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => theme_gray,
+                    },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => theme_text_teal,
+                            _ => Color::from_rgb8(50, 50, 55),
+                        },
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::EnginePaperToggled),
-                live_btn.style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(theme_text_pink)),
+                live_btn.style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(220, 40, 100))),
+                        _ => Some(iced::Background::Color(theme_text_pink)),
+                    },
                     text_color: Color::WHITE,
                     border: iced::Border { color: theme_text_pink, width: 1.0, radius: 4.0.into() },
                     ..Default::default()
@@ -931,19 +1207,39 @@ impl MercuryApp {
         // Launch Action Button (START / STOP)
         let launch_btn = if self.engine_running {
             button(text("STOP ENGINE").size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(Color::WHITE))
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(theme_text_pink)),
+                .style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(220, 40, 100))),
+                        _ => Some(iced::Background::Color(theme_text_pink)),
+                    },
                     text_color: Color::WHITE,
-                    border: iced::Border { color: theme_text_pink, width: 1.0, radius: 6.0.into() },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => Color::from_rgb8(255, 150, 180),
+                            _ => theme_text_pink,
+                        },
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::StopEngine)
         } else {
             button(text("START ENGINE").size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(Color::BLACK))
-                .style(move |_, _| button::Style {
-                    background: Some(iced::Background::Color(theme_text_teal)),
+                .style(move |_, status| button::Style {
+                    background: match status {
+                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(0, 200, 160))),
+                        _ => Some(iced::Background::Color(theme_text_teal)),
+                    },
                     text_color: Color::BLACK,
-                    border: iced::Border { color: theme_text_teal, width: 1.0, radius: 6.0.into() },
+                    border: iced::Border {
+                        color: match status {
+                            iced::widget::button::Status::Hovered => Color::from_rgb8(150, 255, 230),
+                            _ => theme_text_teal,
+                        },
+                        width: 1.0,
+                        radius: 6.0.into(),
+                    },
                     ..Default::default()
                 })
                 .on_press(Message::StartEngine)

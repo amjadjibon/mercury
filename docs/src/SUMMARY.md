@@ -28,6 +28,7 @@
 - [Replay & Recorder](./architecture/replay.md)
 - [Metrics](./architecture/metrics.md)
 - [TUI Monitor](./architecture/tui.md)
+- [Desktop GUI](./architecture/gui.md)
 
 # Strategies
 

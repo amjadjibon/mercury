@@ -38,6 +38,9 @@ cargo run --bin mercury -- replay --file data.parquet --speed 1.0
 # TUI monitor (connect to a running engine)
 cargo run --bin mercury-tui
 
+# Premium Desktop GUI (launch and manage engines visually)
+cargo run -p mercury-gui
+
 # Benchmarks
 cargo bench
 ```
@@ -130,6 +133,7 @@ The `EventBus` is a custom MPMC ring buffer (65,536 pre-allocated slots). Each s
 | `storage` | `StorageManager` — SQLite via sqlx, persists fills |
 | `cli` | Binary `mercury` — `run`, `record`, `replay`, `backtest` subcommands |
 | `tui` | Binary `mercury-tui` — ratatui dashboard over IPC |
+| `gui` | Binary `mercury-gui` — Native premium GPU-accelerated trading console (Iced) |
 | `benches` | Criterion benchmarks; `allocations.rs` asserts 0 heap allocs on hot path |
 
 ---
@@ -346,6 +350,23 @@ Configured via `mercury.toml` or `RiskConfig` defaults:
 - Daily loss limit (kills new orders when breached)
 - Max orders per second (token-bucket rate limiter)
 - Kill switch — halts all order submission and cancels open orders
+
+---
+
+## Native Desktop GUI (Iced)
+
+Mercury includes a high-end, premium GPU-accelerated native desktop trading console built on **Iced v0.14** with a highly polished **Obsidian Cyberpunk** aesthetic. It provides a visual control suite that overlays live operations with institutional trading dashboard quality:
+
+- **Subprocess Engine Spawner**: Enter symbol (e.g. `BTCUSDT`), choose strategy (`market_maker`, `rsi`, `arbitrage`, etc.), and click **START ENGINE** to launch detached trading processes in the background. Standard terminal logs pipe dynamically into a scrolling, color-coded logging panel.
+- **Top Card Ticker Deck**: Features a modular obsidian deck showing logo details, connection active-state badges, net position inventory exposure (auto-colored by size), strategy-wide unrealized PnL (auto-colored by yield), and real-time bid/ask percentage spread.
+- **L2 Cumulative Liquidity Wall**: A high-fidelity GPU canvas rendering buy and sell walls with mathematically aligned price and volume grid scales.
+- **Microsecond Telemetry Sparkline**: Tracks historical event latency (p50/p99) on the event bus, displaying top/bottom microsecond markers on the vertical axis.
+- **Direct Order overrides & Emergency Halt**: Place standard manual bids or immediately invoke the global emergency **KILL SWITCH** to halt the engine and flatten positions.
+
+```bash
+# Launch the desktop dashboard
+cargo run -p mercury-gui
+```
 
 ---
 
