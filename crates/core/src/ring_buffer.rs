@@ -43,6 +43,18 @@ pub(crate) struct RingBufferInner<T> {
 unsafe impl<T: Send> Send for RingBufferInner<T> {}
 unsafe impl<T: Send> Sync for RingBufferInner<T> {}
 
+impl<T> Drop for RingBufferInner<T> {
+    fn drop(&mut self) {
+        for (i, slot) in self.slots.iter().enumerate() {
+            if slot.sequence.load(Ordering::Acquire) > i as u64 {
+                unsafe {
+                    let _ = (*slot.data.get()).assume_init_read();
+                }
+            }
+        }
+    }
+}
+
 /// Pre-allocated ring buffer shared between one or more publishers and any
 /// number of independent `Subscriber` handles.
 pub struct RingBuffer<T: Clone + Send> {
@@ -114,6 +126,18 @@ impl<T: Clone + Send> RingBuffer<T> {
     pub fn publish(&self, value: T) -> u64 {
         let seq = self.inner.publisher_seq.fetch_add(1, Ordering::Relaxed);
         let slot = &self.inner.slots[seq as usize & self.inner.mask];
+        
+        // Transitional sequence store to signal to lagging subscribers that the slot is under construction
+        slot.sequence.store(seq, Ordering::Release);
+        
+        // Drop the old value that is currently in the slot if it was initialized in a previous rotation
+        if seq >= self.inner.capacity as u64 {
+            unsafe {
+                let old_val = (*slot.data.get()).assume_init_read();
+                std::mem::drop(old_val);
+            }
+        }
+        
         unsafe { (*slot.data.get()).write(value) };
         slot.sequence.store(seq + 1, Ordering::Release);
         self.inner.notify.notify_waiters();
@@ -201,5 +225,162 @@ impl<T: Clone + Send> Subscriber<T> {
                 Err(RecvError::Empty) => notified.await,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    struct TrackDrop {
+        counter: Arc<AtomicUsize>,
+    }
+
+    impl TrackDrop {
+        fn new(counter: Arc<AtomicUsize>) -> Self {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Self { counter }
+        }
+    }
+
+    impl Clone for TrackDrop {
+        fn clone(&self) -> Self {
+            self.counter.fetch_add(1, Ordering::SeqCst);
+            Self { counter: self.counter.clone() }
+        }
+    }
+
+    impl Drop for TrackDrop {
+        fn drop(&mut self) {
+            self.counter.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn test_drop_on_overwrite() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let buf = RingBuffer::new(4);
+        assert_eq!(buf.capacity(), 4);
+
+        for _ in 0..4 {
+            buf.publish(TrackDrop::new(counter.clone()));
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 4);
+
+        // Overwrite the first slot
+        buf.publish(TrackDrop::new(counter.clone()));
+        assert_eq!(counter.load(Ordering::SeqCst), 4);
+
+        // Overwrite the second slot
+        buf.publish(TrackDrop::new(counter.clone()));
+        assert_eq!(counter.load(Ordering::SeqCst), 4);
+    }
+
+    #[test]
+    fn test_drop_on_buffer_drop() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let buf = RingBuffer::new(4);
+            for _ in 0..3 {
+                buf.publish(TrackDrop::new(counter.clone()));
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 3);
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_drop_on_buffer_drop_full() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        {
+            let buf = RingBuffer::new(4);
+            for _ in 0..10 {
+                buf.publish(TrackDrop::new(counter.clone()));
+            }
+            assert_eq!(counter.load(Ordering::SeqCst), 4);
+        }
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn test_basic_publish_subscribe() {
+        let buf = RingBuffer::new(4);
+        let mut sub = buf.subscribe();
+
+        assert_eq!(sub.try_recv(), Err(RecvError::Empty));
+
+        buf.publish(10);
+        buf.publish(20);
+
+        assert_eq!(sub.try_recv(), Ok(10));
+        assert_eq!(sub.try_recv(), Ok(20));
+        assert_eq!(sub.try_recv(), Err(RecvError::Empty));
+    }
+
+    #[test]
+    fn test_subscriber_lagged() {
+        let buf = RingBuffer::new(4);
+        let mut sub = buf.subscribe();
+
+        // Publish 6 items. Capacity is 4.
+        // Slots will be overwritten.
+        // Seq 0, 1, 2, 3, 4, 5.
+        // Slot 0 gets 0 then 4.
+        // Slot 1 gets 1 then 5.
+        // Slot 2 gets 2.
+        // Slot 3 gets 3.
+        for i in 0..6 {
+            buf.publish(i);
+        }
+
+        // Sub cursor is 0.
+        // Slot 0 now has sequence 5 (committed seq for item 4, which is 5).
+        // Since slot 0's sequence (5) > sub cursor + 1 (1), the sub is lagged.
+        // It will skip forward to lapped_to = seq - 1 = 4.
+        // Skipped count = lapped_to - next = 4 - 0 = 4.
+        assert_eq!(sub.try_recv(), Err(RecvError::Lagged(4)));
+        assert_eq!(sub.cursor, 4);
+
+        // Next read should get sequence 4 (which is item 4).
+        assert_eq!(sub.try_recv(), Ok(4));
+        assert_eq!(sub.try_recv(), Ok(5));
+        assert_eq!(sub.try_recv(), Err(RecvError::Empty));
+    }
+
+    #[test]
+    fn test_buffer_closed() {
+        let buf = RingBuffer::new(4);
+        let mut sub = buf.subscribe();
+
+        buf.publish(1);
+        buf.close();
+
+        assert_eq!(sub.try_recv(), Ok(1));
+        assert_eq!(sub.try_recv(), Err(RecvError::Closed));
+        assert_eq!(sub.recv(), None);
+    }
+
+    #[test]
+    fn test_async_recv() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let buf = RingBuffer::new(4);
+            let mut sub = buf.subscribe();
+
+            let handle = tokio::spawn(async move {
+                sub.recv_async().await
+            });
+
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            buf.publish(42);
+
+            let res = handle.await.unwrap();
+            assert_eq!(res, Ok(42));
+        });
     }
 }
