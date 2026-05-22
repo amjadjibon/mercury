@@ -272,3 +272,90 @@ impl ExchangeGateway for PaperGateway {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mercury_core::{BookUpdate, Event, EventBus, Exchange, Level, Order, Side, Symbol};
+    use std::sync::Arc;
+    use std::str::FromStr;
+
+    #[tokio::test]
+    async fn test_paper_gateway_lifecycle() {
+        let bus = Arc::new(EventBus::new(16));
+        let gateway = PaperGateway::new(Arc::clone(&bus), 0); // 0ms simulated latency
+        
+        gateway.connect().await.unwrap();
+        assert_eq!(gateway.exchange(), Exchange::Binance);
+
+        // Subscribe to fills
+        let mut fills_rx = gateway.fills();
+
+        // 1. Submit a limit order when there's no market data. It should sit passive.
+        let order1 = Order::limit(
+            1,
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            Side::Buy,
+            FixedPoint(5_000_000_000_000i64), // $50,000
+            FixedPoint(10_000_000i64),    // 0.1
+        );
+        gateway.submit_order(&order1).await.unwrap();
+
+        // 2. Publish market update to cross the order
+        // Let's send a BookUpdate with best ask = 49000.0. Since we wanted to Buy at 50000.0, this will cross!
+        let best_ask = Level::new(FixedPoint(4_900_000_000_000i64), FixedPoint(10_000_000i64));
+        let update = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[],
+            &[best_ask],
+            0,
+            true,
+        );
+        bus.try_publish(Event::new(10, EventPayload::BookUpdate(Arc::new(update)))).unwrap();
+
+        // Check if we get a fill
+        let fill = tokio::time::timeout(std::time::Duration::from_millis(200), fills_rx.recv())
+            .await
+            .unwrap()
+            .expect("Expected fill for crossed limit order");
+
+        assert_eq!(fill.order_id, 1);
+        assert_eq!(fill.price, Decimal::from_str("49000.0").unwrap());
+        assert_eq!(fill.quantity, Decimal::from_str("0.1").unwrap());
+
+        // 3. Test cancellation
+        let order2 = Order::limit(
+            2,
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            Side::Buy,
+            FixedPoint(3_000_000_000_000i64), // $30,000
+            FixedPoint(10_000_000i64),    // 0.1
+        );
+        gateway.submit_order(&order2).await.unwrap();
+        gateway.cancel_order(Symbol::new("BTCUSDT"), 2).await.unwrap();
+
+        // Yield execution to allow matching engine to process cancellation
+        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+
+        // Publish a book update that would have crossed order2 if not cancelled
+        let ask_crossed = Level::new(FixedPoint(2_500_000_000_000i64), FixedPoint(10_000_000i64));
+        let update2 = BookUpdate::from_slices(
+            Exchange::Binance,
+            Symbol::new("BTCUSDT"),
+            &[],
+            &[ask_crossed],
+            0,
+            true,
+        );
+        bus.try_publish(Event::new(11, EventPayload::BookUpdate(Arc::new(update2)))).unwrap();
+
+        // We shouldn't get any fill since it was cancelled
+        let res = tokio::time::timeout(std::time::Duration::from_millis(50), fills_rx.recv()).await;
+        assert!(res.is_err(), "Expected no fills due to cancellation");
+
+        gateway.disconnect().await.unwrap();
+    }
+}

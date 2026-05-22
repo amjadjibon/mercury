@@ -189,3 +189,153 @@ struct CoinbaseSubscription {
     #[serde(skip_serializing_if = "Option::is_none")]
     jwt: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::FeedParser;
+    use mercury_core::Exchange;
+
+    #[test]
+    fn test_coinbase_metadata() {
+        let parser = CoinbaseParser;
+        assert_eq!(parser.exchange(), Exchange::Coinbase);
+        assert_eq!(parser.ws_url(&[]), "wss://advanced-trade-ws.coinbase.com");
+
+        let sub_msg = parser.subscribe_message(&["BTC-USD".to_string()]).unwrap();
+        assert!(sub_msg.contains("subscribe"));
+        assert!(sub_msg.contains("l2_data"));
+        assert!(sub_msg.contains("BTC-USD"));
+    }
+
+    #[test]
+    fn test_coinbase_parse_snapshot() {
+        let parser = CoinbaseParser;
+        let msg = r#"{
+          "channel": "l2_data",
+          "timestamp": "2026-05-22T12:00:00Z",
+          "events": [
+            {
+              "type": "snapshot",
+              "updates": [
+                {
+                  "side": "bid",
+                  "price_level": "50000.0",
+                  "new_quantity": "0.1",
+                  "product_id": "BTC-USD"
+                },
+                {
+                  "side": "ask",
+                  "price_level": "50005.0",
+                  "new_quantity": "0.2",
+                  "product_id": "BTC-USD"
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let parsed = parser.parse(msg.as_bytes()).unwrap();
+        match parsed {
+            FeedMessage::DepthSnapshot(book) => {
+                assert_eq!(book.exchange, Exchange::Coinbase);
+                assert_eq!(book.symbol.as_str(), "BTC-USD");
+                assert_eq!(book.bid_levels().len(), 1);
+                assert_eq!(book.ask_levels().len(), 1);
+                
+                assert_eq!(book.bid_levels()[0].price, FixedPoint::from_f64(50000.0));
+                assert_eq!(book.bid_levels()[0].quantity, FixedPoint::from_f64(0.1));
+                
+                assert_eq!(book.ask_levels()[0].price, FixedPoint::from_f64(50005.0));
+                assert_eq!(book.ask_levels()[0].quantity, FixedPoint::from_f64(0.2));
+            }
+            other => panic!("Expected DepthSnapshot, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_coinbase_parse_update() {
+        let parser = CoinbaseParser;
+        let msg = r#"{
+          "channel": "l2_data",
+          "timestamp": "2026-05-22T12:00:01Z",
+          "events": [
+            {
+              "type": "update",
+              "updates": [
+                {
+                  "side": "bid",
+                  "price_level": "50000.0",
+                  "new_quantity": "0.0",
+                  "product_id": "BTC-USD"
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let parsed = parser.parse(msg.as_bytes()).unwrap();
+        match parsed {
+            FeedMessage::DepthUpdate(book) => {
+                assert_eq!(book.exchange, Exchange::Coinbase);
+                assert_eq!(book.symbol.as_str(), "BTC-USD");
+                assert_eq!(book.bid_levels().len(), 1);
+                assert_eq!(book.ask_levels().len(), 0);
+                assert_eq!(book.bid_levels()[0].price, FixedPoint::from_f64(50000.0));
+                assert_eq!(book.bid_levels()[0].quantity, FixedPoint::ZERO);
+            }
+            other => panic!("Expected DepthUpdate, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_coinbase_parse_trade() {
+        let parser = CoinbaseParser;
+        let msg = r#"{
+          "channel": "market_trades",
+          "timestamp": "2026-05-22T12:00:02Z",
+          "events": [
+            {
+              "type": "update",
+              "trades": [
+                {
+                  "trade_id": "12345678",
+                  "product_id": "BTC-USD",
+                  "price": "49999.5",
+                  "size": "0.05",
+                  "side": "SELL"
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let parsed = parser.parse(msg.as_bytes()).unwrap();
+        match parsed {
+            FeedMessage::Trade(trade) => {
+                assert_eq!(trade.exchange, Exchange::Coinbase);
+                assert_eq!(trade.symbol.as_str(), "BTC-USD");
+                assert_eq!(trade.price, Decimal::from_str("49999.5").unwrap());
+                assert_eq!(trade.quantity, Decimal::from_str("0.05").unwrap());
+                assert_eq!(trade.side, Side::Sell);
+                assert_eq!(trade.trade_id, 12345678);
+            }
+            other => panic!("Expected Trade, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_coinbase_parse_errors() {
+        let parser = CoinbaseParser;
+        
+        // Invalid JSON
+        let err = parser.parse(b"{invalid}").unwrap_err();
+        assert!(matches!(err, ParseError::InvalidJson(_)));
+
+        // Unknown channel
+        let msg = r#"{"channel": "heartbeats", "timestamp": "2026-05-22T12:00:00Z"}"#;
+        let err = parser.parse(msg.as_bytes()).unwrap_err();
+        assert!(matches!(err, ParseError::UnknownMessage(_)));
+    }
+}
+

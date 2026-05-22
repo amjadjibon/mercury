@@ -105,3 +105,84 @@ impl Strategy for RsiStrategy {
         self.position = Decimal::ZERO;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+    use rust_decimal_macros::dec;
+    use mercury_core::{Exchange, Fill, Side, Symbol, Trade};
+
+    #[test]
+    fn test_rsi_strategy_lifecycle() {
+        let mut strategy = RsiStrategy::new("BTCUSDT".to_string(), 14, dec!(0.1));
+        assert_eq!(strategy.id(), StrategyId::Rsi);
+
+        // Initially we shouldn't have any position
+        assert_eq!(strategy.position, Decimal::ZERO);
+
+        // Test on_fill logic
+        let fill = Fill {
+            trade_id: 1,
+            order_id: 100,
+            symbol: Symbol::new("BTCUSDT"),
+            side: Side::Buy,
+            price: dec!(50000.0),
+            quantity: dec!(0.1),
+            fee: Decimal::ZERO,
+            fee_asset: "USDT".to_string(),
+            timestamp: 0,
+            exchange: Exchange::Binance,
+            is_maker: false,
+        };
+        strategy.on_fill(&fill);
+        assert_eq!(strategy.position, dec!(0.1));
+
+        // Test on_trade behavior with mock prices
+        // Oversold signal test: feed falling prices to push RSI down
+        strategy.reset();
+        let mut trade = Trade {
+            exchange: Exchange::Binance,
+            symbol: Symbol::new("BTCUSDT"),
+            price: dec!(100.0),
+            quantity: dec!(0.1),
+            side: Side::Buy,
+            trade_id: 1,
+            timestamp: 0,
+        };
+
+        // We feed stable then falling prices to drive RSI below 30
+        let mut signals = Vec::new();
+        
+        // Feed 15 updates
+        let prices = vec![
+            dec!(100.0), dec!(99.0), dec!(98.0), dec!(97.0), dec!(96.0),
+            dec!(95.0), dec!(90.0), dec!(85.0), dec!(80.0), dec!(75.0),
+            dec!(70.0), dec!(65.0), dec!(60.0), dec!(55.0), dec!(50.0),
+        ];
+        
+        for price in prices {
+            trade.price = price;
+            signals.extend(strategy.on_trade(&trade));
+        }
+
+        // We expect at least one buy signal since it fell drastically (oversold)
+        assert!(!signals.is_empty(), "RSI should have generated a buy signal");
+        assert_eq!(signals[0].side, Side::Buy);
+
+        // Now test overbought signal: feed rising prices
+        strategy.reset();
+        let mut signals = Vec::new();
+        let prices = vec![
+            dec!(10.0), dec!(20.0), dec!(30.0), dec!(40.0), dec!(50.0),
+            dec!(60.0), dec!(70.0), dec!(80.0), dec!(90.0), dec!(100.0),
+            dec!(110.0), dec!(120.0), dec!(130.0), dec!(140.0), dec!(150.0),
+        ];
+        for price in prices {
+            trade.price = price;
+            signals.extend(strategy.on_trade(&trade));
+        }
+        assert!(!signals.is_empty(), "RSI should have generated a sell signal");
+        assert_eq!(signals[0].side, Side::Sell);
+    }
+}

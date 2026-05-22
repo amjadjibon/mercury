@@ -64,3 +64,73 @@ async fn handle_client(mut stream: UnixStream, mut rx: broadcast::Receiver<Event
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{Event, EventPayload, RiskAlert, RiskAlertType};
+    use std::time::Duration;
+    use tokio::io::AsyncBufReadExt;
+    use tokio::io::BufReader;
+
+    #[tokio::test]
+    async fn test_ipc_server_lifecycle() {
+        let test_id = crate::types::now_nanos();
+        let socket_path = std::env::temp_dir().join(format!("mercury_test_{}.sock", test_id));
+        
+        let server = IpcServer::new(socket_path.clone());
+        server.start().await.expect("Failed to start IPC server");
+
+        // Allow some time for socket to bind
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // Verify socket file was created
+        assert!(socket_path.exists());
+
+        // Connect client
+        let stream = UnixStream::connect(&socket_path)
+            .await
+            .expect("Failed to connect client to IPC socket");
+
+        // Yield execution to allow background server task to accept and subscribe
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        // Broadcast a dummy event
+        let event = Event::new(
+            42,
+            EventPayload::RiskAlert(RiskAlert {
+                alert_type: RiskAlertType::ConnectionLost,
+                message: "Simulated risk alert".to_string(),
+                timestamp: crate::types::now_nanos(),
+            }),
+        );
+        
+        server.broadcast(event.clone());
+
+        // Read event from client
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        
+        let read_result = tokio::time::timeout(Duration::from_millis(300), reader.read_line(&mut line)).await;
+        
+        assert!(read_result.is_ok(), "Timed out reading from IPC stream");
+        let bytes_read = read_result.unwrap().expect("Failed to read line from stream");
+        assert!(bytes_read > 0, "Client read 0 bytes");
+
+        // Deserialize and assert
+        let received_event: Event = serde_json::from_str(&line).expect("Failed to deserialize event");
+        assert_eq!(received_event.id, 42);
+        
+        match received_event.payload {
+            EventPayload::RiskAlert(alert) => assert_eq!(alert.message, "Simulated risk alert"),
+            _ => panic!("Expected RiskAlert payload"),
+        }
+
+        // Clean up
+        if socket_path.exists() {
+            let _ = tokio::fs::remove_file(&socket_path).await;
+        }
+    }
+}
+
+
