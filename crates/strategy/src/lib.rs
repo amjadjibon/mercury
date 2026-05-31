@@ -2,6 +2,7 @@
 
 pub mod arbitrage;
 pub mod checkpoint;
+pub mod fill_prob;
 pub mod rl_strategy;
 pub mod features;
 pub mod indicators;
@@ -31,6 +32,7 @@ pub use inference_strategy::{
     InferenceInputMode, InferenceStrategy, OnlineClassifier, OnlineClassifierConfig,
     OnlineLearningConfig,
 };
+pub use fill_prob::{FillProbMode, FillProbabilityModel};
 pub use market_maker::MarketMaker;
 pub use microstructure::{KyleLambda, RollSpread, Vpin};
 pub use momentum::Momentum;

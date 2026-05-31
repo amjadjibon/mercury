@@ -8,7 +8,12 @@
 //! - γ (risk_aversion): how aggressively quotes skew with inventory (0.01–1.0)
 //! - κ (order_rate):    proxy for order-arrival depth; higher = tighter spread
 //! - min_spread_bps:    floor on the half-spread regardless of model output
+//!
+//! Fill probability override (`FillProbMode::MaxExpectedValue`):
+//! After `MIN_LOGISTIC_OBS` quote outcomes, the empirical fill-probability model
+//! replaces the A-S δ with the distance d* that maximises `p_fill(d) × d`.
 
+use crate::fill_prob::{FillProbMode, FillProbabilityModel};
 use crate::regime::{HmmFilter, RegimeConfig, Regime};
 use crate::traits::Strategy;
 use crate::volatility::VolatilityEstimator;
@@ -20,6 +25,14 @@ use rust_decimal_macros::dec;
 use std::sync::Arc;
 
 type InventorySkewProvider = Arc<dyn Fn(Symbol) -> Decimal + Send + Sync>;
+
+/// State of a single pending quote awaiting fill-outcome resolution.
+struct PendingQuote {
+    distance_bps: f64,
+    queue_depth: f64,
+    spread_bps: f64,
+    filled: bool,
+}
 
 /// Avellaneda-Stoikov market maker with inventory-adjusted reservation price.
 pub struct MarketMaker {
@@ -60,6 +73,14 @@ pub struct MarketMaker {
     hmm: HmmFilter,
     /// Regime spread scaling factors.
     regime_config: RegimeConfig,
+    /// Empirical fill probability model — learns from real quote outcomes.
+    fill_prob: FillProbabilityModel,
+    /// Whether to use the fill-prob model to override A-S δ.
+    fill_prob_mode: FillProbMode,
+    /// Pending bid quote waiting for fill outcome.
+    pending_bid: Option<PendingQuote>,
+    /// Pending ask quote waiting for fill outcome.
+    pending_ask: Option<PendingQuote>,
 }
 
 impl MarketMaker {
@@ -89,7 +110,19 @@ impl MarketMaker {
             peg_last_best_ask: None,
             hmm: HmmFilter::default(),
             regime_config: RegimeConfig::default(),
+            fill_prob: FillProbabilityModel::new(),
+            fill_prob_mode: FillProbMode::AvellanedaStoikov,
+            pending_bid: None,
+            pending_ask: None,
         }
+    }
+
+    /// Enable fill-probability mode: once enough quote outcomes are observed, the
+    /// empirical model replaces the A-S δ with the distance that maximises
+    /// `p_fill(d) × d`.  Falls back to A-S while warming up.
+    pub fn with_fill_prob_mode(mut self, mode: FillProbMode) -> Self {
+        self.fill_prob_mode = mode;
+        self
     }
 
     /// Override regime detection configuration.
@@ -200,6 +233,53 @@ impl MarketMaker {
         }
 
         skew * self.volatility() * mid
+    }
+
+    /// Compute the spread_bps of the current book (best ask − best bid, in bps).
+    fn book_spread_bps(book: &OrderBook, mid: Decimal) -> f64 {
+        let bid = book.best_bid().map(|l| l.price.to_decimal());
+        let ask = book.best_ask().map(|l| l.price.to_decimal());
+        match (bid, ask) {
+            (Some(b), Some(a)) if mid > Decimal::ZERO => {
+                ((a - b) / mid * dec!(10000))
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap_or(10.0)
+            }
+            _ => 10.0,
+        }
+    }
+
+    /// Depth (quantity) at the best bid or ask level as f64.
+    fn best_level_depth(book: &OrderBook, side: Side) -> f64 {
+        let level = match side {
+            Side::Buy => book.best_bid(),
+            Side::Sell => book.best_ask(),
+        };
+        level
+            .map(|l| {
+                l.quantity
+                    .to_decimal()
+                    .to_string()
+                    .parse::<f64>()
+                    .unwrap_or(0.0)
+            })
+            .unwrap_or(0.0)
+    }
+
+    /// Resolve pending quote outcomes: record fill/cancel into the fill-prob model.
+    fn resolve_pending(&mut self, spread_bps: f64) {
+        // If pending was filled, it was already recorded in on_fill; skip double-recording.
+        if let Some(pq) = self.pending_bid.take() {
+            if !pq.filled {
+                self.fill_prob.record_quote(pq.distance_bps, pq.queue_depth, spread_bps, false);
+            }
+        }
+        if let Some(pq) = self.pending_ask.take() {
+            if !pq.filled {
+                self.fill_prob.record_quote(pq.distance_bps, pq.queue_depth, spread_bps, false);
+            }
+        }
     }
 
     /// Compute optimal half-spread: δ = (γ·σ²)/2 + (1/γ)·ln(1 + γ/κ)
@@ -319,15 +399,67 @@ impl Strategy for MarketMaker {
         };
 
         let r = self.reservation_price(mid) - self.risk_inventory_shift(book.symbol, mid);
-        let delta = self.half_spread(mid) * regime_mult;
+        let as_delta = self.half_spread(mid) * regime_mult;
+
+        // Resolve fill outcomes from the previous quote round before placing new ones.
+        let spread_bps = Self::book_spread_bps(book, mid);
+        self.resolve_pending(spread_bps);
+
+        // Optionally override A-S δ with the EV-maximising distance.
+        let delta = if self.fill_prob_mode == FillProbMode::MaxExpectedValue {
+            let mid_f64 = mid.to_string().parse::<f64>().unwrap_or(1.0);
+            let bid_depth = Self::best_level_depth(book, Side::Buy);
+            let ask_depth = Self::best_level_depth(book, Side::Sell);
+            let queue_depth = (bid_depth + ask_depth) / 2.0;
+            // A-S δ as bps — used as the lower search bound.
+            let as_bps = as_delta.to_string().parse::<f64>().unwrap_or(1.0)
+                / mid_f64.max(1.0)
+                * 10_000.0;
+            if let Some(opt_bps) =
+                self.fill_prob
+                    .optimal_distance_bps(queue_depth, spread_bps, as_bps * 0.5, as_bps * 3.0)
+            {
+                let opt_frac = opt_bps / 10_000.0;
+                if let Ok(d) = Decimal::from_str_exact(&format!("{:.10}", opt_frac)) {
+                    d * mid
+                } else {
+                    as_delta
+                }
+            } else {
+                as_delta
+            }
+        } else {
+            as_delta
+        };
 
         let bid_price = r - delta;
         let ask_price = r + delta;
+
+        // Compute distance_bps for fill-prob recording.
+        let mid_f64 = mid.to_string().parse::<f64>().unwrap_or(1.0);
+        let delta_f64 = delta.to_string().parse::<f64>().unwrap_or(0.0);
+        let distance_bps = delta_f64 / mid_f64.max(1.0) * 10_000.0;
+        let bid_depth = Self::best_level_depth(book, Side::Buy);
+        let ask_depth = Self::best_level_depth(book, Side::Sell);
 
         // Sanity: bid must be below ask and both positive.
         if bid_price <= Decimal::ZERO || ask_price <= bid_price {
             return vec![];
         }
+
+        // Store pending quotes for fill-outcome tracking.
+        self.pending_bid = Some(PendingQuote {
+            distance_bps,
+            queue_depth: bid_depth,
+            spread_bps,
+            filled: false,
+        });
+        self.pending_ask = Some(PendingQuote {
+            distance_bps,
+            queue_depth: ask_depth,
+            spread_bps,
+            filled: false,
+        });
 
         vec![
             Signal {
@@ -359,8 +491,20 @@ impl Strategy for MarketMaker {
 
     fn on_fill(&mut self, fill: &Fill) {
         match fill.side {
-            Side::Buy => self.inventory += fill.quantity,
-            Side::Sell => self.inventory -= fill.quantity,
+            Side::Buy => {
+                self.inventory += fill.quantity;
+                if let Some(pq) = self.pending_bid.take() {
+                    self.fill_prob
+                        .record_quote(pq.distance_bps, pq.queue_depth, pq.spread_bps, true);
+                }
+            }
+            Side::Sell => {
+                self.inventory -= fill.quantity;
+                if let Some(pq) = self.pending_ask.take() {
+                    self.fill_prob
+                        .record_quote(pq.distance_bps, pq.queue_depth, pq.spread_bps, true);
+                }
+            }
         }
     }
 
@@ -373,6 +517,9 @@ impl Strategy for MarketMaker {
         self.peg_last_best_bid = None;
         self.peg_last_best_ask = None;
         self.hmm.reset();
+        self.fill_prob.reset();
+        self.pending_bid = None;
+        self.pending_ask = None;
     }
 }
 
