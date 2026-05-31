@@ -12,6 +12,7 @@ pub mod ipc;
 pub mod orderbook;
 pub mod pool;
 pub mod ring_buffer;
+pub mod shmem;
 pub mod types;
 
 pub use event_bus::{EventBus, PublishError};

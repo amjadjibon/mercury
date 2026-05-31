@@ -161,6 +161,13 @@ impl StorageManager {
 
         Ok(())
     }
+
+    pub async fn load_all_trades(&self) -> Result<Vec<TradeModel>> {
+        let trades = sqlx::query_as::<_, TradeModel>("SELECT * FROM trades ORDER BY timestamp ASC")
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(trades)
+    }
 }
 
 #[cfg(test)]

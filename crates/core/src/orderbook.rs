@@ -115,6 +115,14 @@ impl OrderBook {
         }
     }
 
+    pub fn bids(&self) -> &[Level] {
+        &self.bids
+    }
+
+    pub fn asks(&self) -> &[Level] {
+        &self.asks
+    }
+
     pub fn bid_levels(&self) -> usize {
         self.bids.len()
     }

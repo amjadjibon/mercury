@@ -72,6 +72,7 @@ Located in the right panel:
 
 ### 3. Middle Pane Tabs
 Traders can swap content between:
+*   **Price Chart**: A high-end OHLCV Candlestick chart featuring real-time trade aggregation, bottom volume bars, dynamic right price tick scales, and transaction execution marks mapped as diamonds.
 *   **Matching Prints**: Live feed table showing historical ticks, fill times, buy/sell flags, and filled quantities.
 *   **System Logs**: A color-coded terminal viewport displaying real-time stdout/stderr lines from the running subprocess, highlighted for warnings and system updates.
 

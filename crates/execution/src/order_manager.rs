@@ -2,9 +2,10 @@
 
 use crate::probe::{LiquidityProbeConfig, LiquidityProber, ProbeFill};
 use crate::queue_model::{FillProbabilityConfig, FillProbabilityModel, crossed_order};
+use crate::sor::{UnifiedOrderBook, SmartOrderRouter};
 use mercury_core::{
-    BookUpdate, Event, EventBus, EventPayload, Fill, Order, OrderId, OrderStatus, Signal,
-    TimeInForce, Timestamp, now_nanos,
+    BookUpdate, Event, EventBus, EventPayload, Exchange, Fill, Order, OrderId, OrderStatus, Signal,
+    Symbol, TimeInForce, Timestamp, now_nanos,
 };
 use mercury_gateway::{ExchangeGateway, GatewayError};
 use mercury_risk::{RiskManager, RiskViolation};
@@ -45,6 +46,9 @@ pub struct OrderManager {
     event_bus: Arc<EventBus>,
     fill_probability: RwLock<FillProbabilityModel>,
     liquidity_prober: RwLock<LiquidityProber>,
+    sor: Arc<SmartOrderRouter>,
+    unified_books: RwLock<HashMap<Symbol, UnifiedOrderBook>>,
+    gateways: RwLock<HashMap<Exchange, Arc<dyn ExchangeGateway>>>,
 }
 
 impl OrderManager {
@@ -54,6 +58,10 @@ impl OrderManager {
         gateway: Arc<dyn ExchangeGateway>,
         event_bus: Arc<EventBus>,
     ) -> Self {
+        let default_exchange = gateway.exchange();
+        let mut gateways = HashMap::new();
+        gateways.insert(default_exchange, Arc::clone(&gateway));
+
         Self {
             next_order_id: AtomicU64::new(1),
             open_orders: RwLock::new(HashMap::new()),
@@ -64,7 +72,15 @@ impl OrderManager {
                 FillProbabilityConfig::default(),
             )),
             liquidity_prober: RwLock::new(LiquidityProber::new(LiquidityProbeConfig::default())),
+            sor: Arc::new(SmartOrderRouter::new()),
+            unified_books: RwLock::new(HashMap::new()),
+            gateways: RwLock::new(gateways),
         }
+    }
+
+    /// Register a gateway with the order manager.
+    pub fn register_gateway(&self, exchange: Exchange, gateway: Arc<dyn ExchangeGateway>) {
+        self.gateways.write().insert(exchange, gateway);
     }
 
     /// Update the book snapshot used by fill-probability routing.
@@ -72,6 +88,11 @@ impl OrderManager {
         self.risk_manager.on_book_update(update);
         self.fill_probability.write().apply_book_update(update);
         self.liquidity_prober.write().apply_book_update(update);
+
+        let mut books = self.unified_books.write();
+        let ubook = books.entry(update.symbol)
+            .or_insert_with(|| UnifiedOrderBook::new(update.symbol));
+        ubook.apply_update(update);
     }
 
     /// Submit a small post-only probe one tick inside the spread.
@@ -91,7 +112,7 @@ impl OrderManager {
         Ok(Some(order_id))
     }
 
-    /// Submit a signal as an order.
+    /// Submit a signal as an order (routes via SOR if multiple venues are available).
     pub async fn submit(&self, signal: Signal) -> Result<OrderId, ExecutionError> {
         if signal.cancel_replace {
             if let Err(e) = self.cancel_all(signal.symbol).await {
@@ -99,6 +120,45 @@ impl OrderManager {
             }
         }
 
+        let allocations = {
+            let books = self.unified_books.read();
+            if let Some(ubook) = books.get(&signal.symbol) {
+                self.sor.route_order(signal.quantity, signal.side, &ubook.books)
+            } else {
+                Vec::new()
+            }
+        };
+
+        if allocations.is_empty() {
+            return self.submit_single(signal, self.gateway.clone()).await;
+        }
+
+        let mut first_child_id = 0;
+        for (idx, alloc) in allocations.into_iter().enumerate() {
+            let child_signal = Signal {
+                price: Some(alloc.price),
+                quantity: alloc.quantity,
+                cancel_replace: false,
+                ..signal.clone()
+            };
+
+            let gw = {
+                let gws = self.gateways.read();
+                gws.get(&alloc.exchange).cloned()
+            };
+
+            let gateway = gw.unwrap_or_else(|| self.gateway.clone());
+            let child_id = self.submit_single(child_signal, gateway).await?;
+            if idx == 0 {
+                first_child_id = child_id;
+            }
+        }
+
+        Ok(first_child_id)
+    }
+
+    /// Submit a single child order to a specific gateway.
+    async fn submit_single(&self, signal: Signal, gateway: Arc<dyn ExchangeGateway>) -> Result<OrderId, ExecutionError> {
         // Check risk
         self.risk_manager.check(&signal)?;
 
@@ -109,7 +169,7 @@ impl OrderManager {
         let order_id = self.next_order_id.fetch_add(1, Ordering::SeqCst);
         let mut order = Order {
             id: order_id,
-            exchange: self.gateway.exchange(),
+            exchange: gateway.exchange(),
             symbol: signal.symbol,
             side: signal.side,
             order_type: signal.order_type,
@@ -126,7 +186,7 @@ impl OrderManager {
         }
 
         // Submit to gateway
-        let exchange_order_id = self.gateway.submit_order(&order).await?;
+        let exchange_order_id = gateway.submit_order(&order).await?;
         self.fill_probability.write().record_order(&order);
 
         info!(

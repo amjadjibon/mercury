@@ -52,6 +52,8 @@ pub struct SimulatedExchange {
     trade_log: Vec<TradeSummary>,
     /// Open entry fills awaiting an exit (keyed by Side of the entry)
     open_entries: VecDeque<Fill>,
+    /// Simulated time for perpetual funding calculations
+    last_funding_time_ns: u64,
 }
 
 impl SimulatedExchange {
@@ -72,6 +74,7 @@ impl SimulatedExchange {
             equity_series: Vec::new(),
             trade_log: Vec::new(),
             open_entries: VecDeque::new(),
+            last_funding_time_ns: 0,
         }
     }
 
@@ -93,7 +96,13 @@ impl SimulatedExchange {
     }
 
     pub fn on_book_update(&mut self, update: &BookUpdate) -> Vec<Fill> {
+        self.on_book_update_with_ts(update, mercury_core::types::now_nanos() as u64)
+    }
+
+    pub fn on_book_update_with_ts(&mut self, update: &BookUpdate, timestamp_ns: u64) -> Vec<Fill> {
         self.book.apply_update(update);
+        self.apply_funding_charge(timestamp_ns);
+
         let best_bid = self.book.best_bid().map(|l| l.price.to_decimal()).unwrap_or_default();
         let best_ask = self.book.best_ask().map(|l| l.price.to_decimal()).unwrap_or(Decimal::MAX);
         let mut fills = Vec::new();
@@ -108,6 +117,106 @@ impl SimulatedExchange {
     pub fn on_trade(&mut self, trade: &Trade) -> Vec<Fill> {
         self.update_pnl(trade.price);
         Vec::new()
+    }
+
+    /// Calculate slippage fill price incorporating L2 book depth
+    fn calculate_slippage_price(book: &OrderBook, side: Side, quantity: Decimal) -> Decimal {
+        let levels = match side {
+            Side::Buy => book.asks(), // Buy matches against asks
+            Side::Sell => book.bids(), // Sell matches against bids
+        };
+
+        if levels.is_empty() {
+            return Decimal::ZERO;
+        }
+
+        let mut remaining = quantity;
+        let mut total_cost = Decimal::ZERO;
+        let mut filled_qty = Decimal::ZERO;
+
+        for level in levels {
+            let level_price = level.price.to_decimal();
+            let level_qty = level.quantity.to_decimal();
+
+            let fill_qty = remaining.min(level_qty);
+            total_cost += level_price * fill_qty;
+            filled_qty += fill_qty;
+            remaining -= fill_qty;
+
+            if remaining.is_zero() {
+                break;
+            }
+        }
+
+        // If order quantity exceeds the visible L2 book levels, execute remainder with 5 bps slip per unit
+        if !remaining.is_zero() {
+            let worst_level_price = levels.last().unwrap().price.to_decimal();
+            let slip_multiplier = Decimal::new(10005, 4); // 1.0005 (5 bps slippage surcharge)
+            let excess_cost = worst_level_price * remaining * slip_multiplier;
+            total_cost += excess_cost;
+            filled_qty += remaining;
+        }
+
+        if filled_qty.is_zero() {
+            levels[0].price.to_decimal()
+        } else {
+            total_cost / filled_qty
+        }
+    }
+
+    /// Periodic funding charge applied every 8 hours
+    pub fn apply_funding_charge(&mut self, timestamp_ns: u64) {
+        if self.last_funding_time_ns == 0 {
+            self.last_funding_time_ns = timestamp_ns;
+            return;
+        }
+
+        let elapsed = timestamp_ns.saturating_sub(self.last_funding_time_ns);
+        // 8 hours in nanoseconds = 8 * 3600 * 1_000_000_000 = 28,800,000,000,000 ns
+        let funding_interval = 28_800_000_000_000;
+
+        if elapsed >= funding_interval {
+            let intervals = elapsed / funding_interval;
+            self.last_funding_time_ns += intervals * funding_interval;
+
+            if self.position.is_zero() {
+                return;
+            }
+
+            let mid_price = self.book.mid_price()
+                .map(|p| p.to_decimal())
+                .unwrap_or_else(|| {
+                    let best_bid = self.book.best_bid().map(|l| l.price.to_decimal()).unwrap_or_default();
+                    let best_ask = self.book.best_ask().map(|l| l.price.to_decimal()).unwrap_or_default();
+                    if !best_bid.is_zero() && !best_ask.is_zero() {
+                        (best_bid + best_ask) / Decimal::new(2, 0)
+                    } else {
+                        Decimal::ZERO
+                    }
+                });
+
+            if mid_price.is_zero() {
+                return;
+            }
+
+            // Standard perpetual funding rate of 0.01% (0.0001) per 8 hours
+            let funding_rate = Decimal::new(1, 4); // 0.0001
+            let intervals_dec = Decimal::from(intervals as i64);
+
+            // Funding = position * mid_price * funding_rate * intervals
+            let funding_charge = self.position * mid_price * funding_rate * intervals_dec;
+
+            // Deduct from cash
+            self.cash -= funding_charge;
+
+            info!(
+                position = %self.position,
+                mid_price = %mid_price,
+                intervals = intervals,
+                charge = %funding_charge,
+                "Perpetual Funding Rate Applied"
+            );
+        }
     }
 
     fn match_orders(&mut self, side: Side, market_price: Decimal) -> Vec<Fill> {
@@ -126,12 +235,14 @@ impl SimulatedExchange {
                     continue;
                 }
                 let should_fill = match side {
-                    Side::Buy => order.price.map_or(true, |p| p >= market_price),   // PartialOrd<Decimal> for FixedPoint
-                    Side::Sell => order.price.map_or(true, |p| p <= market_price),
+                    Side::Buy => order.price.map_or(true, |p| p.to_decimal() >= market_price),
+                    Side::Sell => order.price.map_or(true, |p| p.to_decimal() <= market_price),
                 };
                 if should_fill {
                     *status = OrderStatus::Filled;
-                    filled.push((order.clone(), market_price));
+                    // Calculate slippage price incorporating book depth
+                    let fill_price = Self::calculate_slippage_price(&self.book, side, order.quantity.to_decimal());
+                    filled.push((order.clone(), fill_price));
                 } else {
                     active_orders.push_back(id);
                 }

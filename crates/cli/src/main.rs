@@ -328,6 +328,25 @@ async fn run_trading(
         }
     });
 
+    // Create Shared-Memory IPC Server
+    let mut shmem_rx = event_bus.subscribe_all();
+    if let Ok(mut shmem_server) = mercury_core::shmem::ShmemServer::new(PathBuf::from("/tmp/mercury_shmem.bin")) {
+        tokio::spawn(async move {
+            loop {
+                match shmem_rx.recv_async().await {
+                    Ok(event) => {
+                        let _ = shmem_server.broadcast(&event);
+                    }
+                    Err(mercury_core::RecvError::Lagged(n)) => {
+                        tracing::warn!(dropped = n, "Shmem IPC subscriber lagged");
+                    }
+                    Err(mercury_core::RecvError::Closed) => break,
+                    Err(mercury_core::RecvError::Empty) => unreachable!(),
+                }
+            }
+        });
+    }
+
     // Create gateway based on exchange
     let gateway: Arc<dyn ExchangeGateway> = if paper {
         info!("Initializing Paper Trading Gateway (HFT Simulation)");
@@ -760,7 +779,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
         // 1. Update Exchange & Check Fills
         match &event.payload {
             mercury_core::EventPayload::BookUpdate(update) => {
-                let fills = exchange.on_book_update(update);
+                let fills = exchange.on_book_update_with_ts(update, event.timestamp as u64);
                 for fill in fills {
                     // Notify strategy of fills
                     let fill_event = mercury_core::Event::new(

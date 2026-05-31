@@ -2,7 +2,6 @@ use iced::widget::{column, row, container, text, button, text_input, canvas, scr
 use iced::{Element, Length, Subscription, Theme, Color, Task, Font, font};
 use std::collections::VecDeque;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::net::UnixStream;
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
@@ -11,6 +10,17 @@ use mercury_core::Side;
 
 use crate::widgets::depth_map::DepthMap;
 use crate::widgets::sparkline::Sparkline;
+use crate::widgets::candlestick::{Candlestick, CandleBar, ChartMark};
+use crate::widgets::analytics::{TradeAnalytics, compute_analytics};
+use crate::widgets::equity_curve::EquityCurve;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActiveTab {
+    Trades,
+    Logs,
+    Chart,
+    Analytics,
+}
 
 static LOG_TX: Mutex<Option<mpsc::UnboundedSender<Message>>> = Mutex::new(None);
 
@@ -38,8 +48,13 @@ pub struct MercuryApp {
     engine_strategy: String,
     engine_paper: bool,
     engine_logs: VecDeque<String>,
-    show_logs_tab: bool,
+    active_tab: ActiveTab,
+    candles: Vec<CandleBar>,
+    chart_marks: Vec<ChartMark>,
+    timeframe_secs: i64,
     engine_shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    all_trades: Vec<mercury_storage::TradeModel>,
+    analytics: TradeAnalytics,
 }
 
 #[allow(dead_code)]
@@ -79,7 +94,8 @@ pub enum Message {
     EngineSymbolChanged(String),
     EngineStrategyChanged(String),
     EnginePaperToggled,
-    ToggleMiddleTab(bool),
+    SelectMiddleTab(ActiveTab),
+    TradesLoaded(Result<Vec<mercury_storage::TradeModel>, String>),
 }
 
 fn engine_log_stream() -> impl futures_util::stream::Stream<Item = Message> {
@@ -195,36 +211,32 @@ fn send_stopped() {
 }
 
 fn connect_stream() -> impl futures_util::stream::Stream<Item = Message> {
+    use mercury_core::shmem::ShmemClient;
+    use std::path::PathBuf;
+    
     futures_util::stream::unfold(None, |mut state| async move {
-        let reader = match &mut state {
-            Some(r) => r,
+        let client = match &mut state {
+            Some(c) => c,
             None => {
-                match UnixStream::connect("/tmp/mercury.sock").await {
-                    Ok(stream) => {
-                        state = Some(BufReader::new(stream));
+                match ShmemClient::connect(PathBuf::from("/tmp/mercury_shmem.bin")) {
+                    Ok(client) => {
+                        state = Some(client);
                         state.as_mut().unwrap()
                     }
                     Err(_) => {
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                         return Some((Message::ConnectionLost, None));
                     }
                 }
             }
         };
-        let mut line = String::new();
+
         loop {
-            line.clear();
-            match reader.read_line(&mut line).await {
-                Ok(bytes) if bytes > 0 => {
-                    if let Ok(event) = serde_json::from_str::<Event>(&line) {
-                        return Some((Message::EventReceived(event), state));
-                    }
-                }
-                _ => {
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                    return Some((Message::ConnectionLost, None));
-                }
+            if let Some(event) = client.try_recv() {
+                return Some((Message::EventReceived(event), state));
             }
+            // Sleep briefly (1ms) to prevent CPU starvation while maintaining ultra-high telemetry speeds
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
         }
     })
 }
@@ -270,10 +282,51 @@ impl MercuryApp {
                     q.push_back("[SYSTEM] Log terminal console initialized.".to_string());
                     q
                 },
-                show_logs_tab: false,
+                active_tab: ActiveTab::Chart,
+                candles: {
+                    let mut vec = Vec::new();
+                    let start_time = chrono::Utc::now().timestamp() - 3600; // 1 hour ago
+                    let base_price = 50000.0;
+                    for i in 0..60 {
+                        let bar_time = start_time + i * 60;
+                        let noise = ( (i as f64 * 0.15).sin() * 150.0 ) + ( (i as f64 * 0.4).cos() * 50.0 );
+                        let open = base_price + noise;
+                        let close = base_price + noise + ( (i as f64 * 0.5).sin() * 80.0 );
+                        let high = open.max(close) + (i % 3) as f64 * 20.0 + 10.0;
+                        let low = open.min(close) - (i % 4) as f64 * 15.0 - 5.0;
+                        let volume = 1.0 + ( (i % 5) as f64 * 0.5 );
+
+                        vec.push(CandleBar {
+                            time: bar_time,
+                            open,
+                            high,
+                            low,
+                            close,
+                            volume,
+                        });
+                    }
+                    vec
+                },
+                chart_marks: Vec::new(),
+                timeframe_secs: 60,
                 engine_shutdown_tx: None,
+                all_trades: Vec::new(),
+                analytics: TradeAnalytics::default(),
             },
-            Task::none(),
+            Task::perform(
+                async {
+                    match mercury_storage::StorageManager::new("mercury.db").await {
+                        Ok(mgr) => {
+                            match mgr.load_all_trades().await {
+                                Ok(trades) => Ok(trades),
+                                Err(e) => Err(format!("Failed to load trades: {}", e)),
+                            }
+                        }
+                        Err(e) => Err(format!("Failed to initialize DB: {}", e)),
+                    }
+                },
+                Message::TradesLoaded,
+            ),
         )
     }
 
@@ -326,6 +379,35 @@ impl MercuryApp {
                         if self.recent_trades.len() > 25 {
                             self.recent_trades.pop_back();
                         }
+
+                        // Accumulate live OHLCV candlestick bar
+                        let now_unix = chrono::Utc::now().timestamp();
+                        let bar_time = (now_unix / self.timeframe_secs) * self.timeframe_secs;
+
+                        let mut updated = false;
+                        if let Some(last_candle) = self.candles.last_mut() {
+                            if last_candle.time == bar_time {
+                                last_candle.high = last_candle.high.max(price_f64);
+                                last_candle.low = last_candle.low.min(price_f64);
+                                last_candle.close = price_f64;
+                                last_candle.volume += qty_f64;
+                                updated = true;
+                            }
+                        }
+
+                        if !updated {
+                            self.candles.push(CandleBar {
+                                time: bar_time,
+                                open: price_f64,
+                                high: price_f64,
+                                low: price_f64,
+                                close: price_f64,
+                                volume: qty_f64,
+                            });
+                            if self.candles.len() > 100 {
+                                self.candles.remove(0);
+                            }
+                        }
                     }
                     EventPayload::Fill(fill) => {
                         let price_f64 = fill.price.to_string().parse::<f64>().unwrap_or(0.0);
@@ -347,6 +429,22 @@ impl MercuryApp {
                                 0.0
                             };
                         }
+
+                        // Record trade fill marker for the price chart
+                        let fill_time = chrono::Utc::now().timestamp();
+                        self.chart_marks.push(ChartMark {
+                            price: price_f64,
+                            is_buy: fill.side == Side::Buy,
+                            time: fill_time,
+                        });
+                        if self.chart_marks.len() > 150 {
+                            self.chart_marks.remove(0);
+                        }
+
+                        // Append to all_trades and dynamically recompute real-time analytics
+                        let trade_model = mercury_storage::TradeModel::from_fill(&fill);
+                        self.all_trades.push(trade_model);
+                        self.analytics = compute_analytics(&self.all_trades);
                     }
                     EventPayload::LatencyReport(report) => {
                         // Latency is in nanoseconds, convert to microseconds (1us = 1000ns)
@@ -441,8 +539,23 @@ impl MercuryApp {
             Message::EnginePaperToggled => {
                 self.engine_paper = !self.engine_paper;
             }
-            Message::ToggleMiddleTab(show_logs) => {
-                self.show_logs_tab = show_logs;
+            Message::SelectMiddleTab(tab) => {
+                self.active_tab = tab;
+            }
+            Message::TradesLoaded(res) => {
+                match res {
+                    Ok(trades) => {
+                        self.all_trades = trades;
+                        self.analytics = compute_analytics(&self.all_trades);
+                        self.status_message = format!(
+                            "Database initialized. Loaded {} past trade fills.",
+                            self.all_trades.len()
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Database error on startup: {}", e);
+                    }
+                }
             }
         }
         Task::none()
@@ -799,79 +912,149 @@ impl MercuryApp {
             );
         }
 
-        // Tab buttons for matching prints vs system logs
+        // Tab buttons for matching prints vs system logs vs candlestick charts vs analytics
         let trades_tab_btn = button(text("MATCHING PRINTS").size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }))
             .padding(8);
         let logs_tab_btn = button(text("SYSTEM LOGS").size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }))
             .padding(8);
+        let chart_tab_btn = button(text("PRICE CHART").size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }))
+            .padding(8);
+        let analytics_tab_btn = button(text("ANALYTICS").size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }))
+            .padding(8);
 
-        let (trades_tab_btn, logs_tab_btn) = if !self.show_logs_tab {
-            (
-                trades_tab_btn.style(move |_, status| button::Style {
-                    background: match status {
-                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
-                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
-                    },
-                    text_color: theme_text_teal,
-                    border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
-                    ..Default::default()
-                }),
-                logs_tab_btn.style(move |_, status| button::Style {
-                    background: match status {
-                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
-                        _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
-                    },
-                    text_color: match status {
-                        iced::widget::button::Status::Hovered => theme_text_pink,
-                        _ => theme_gray,
-                    },
-                    border: iced::Border {
-                        color: match status {
-                            iced::widget::button::Status::Hovered => theme_text_pink,
-                            _ => Color::from_rgb8(40, 40, 45),
-                        },
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .on_press(Message::ToggleMiddleTab(true))
-            )
+        let trades_tab_btn = if self.active_tab == ActiveTab::Trades {
+            trades_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                },
+                text_color: theme_text_teal,
+                border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
         } else {
-            (
-                trades_tab_btn.style(move |_, status| button::Style {
-                    background: match status {
-                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
-                        _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
-                    },
-                    text_color: match status {
+            trades_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                },
+                text_color: match status {
+                    iced::widget::button::Status::Hovered => theme_text_teal,
+                    _ => theme_gray,
+                },
+                border: iced::Border {
+                    color: match status {
                         iced::widget::button::Status::Hovered => theme_text_teal,
-                        _ => theme_gray,
+                        _ => Color::from_rgb8(40, 40, 45),
                     },
-                    border: iced::Border {
-                        color: match status {
-                            iced::widget::button::Status::Hovered => theme_text_teal,
-                            _ => Color::from_rgb8(40, 40, 45),
-                        },
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
-                .on_press(Message::ToggleMiddleTab(false)),
-                logs_tab_btn.style(move |_, status| button::Style {
-                    background: match status {
-                        iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
-                        _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
-                    },
-                    text_color: theme_text_teal,
-                    border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
-                    ..Default::default()
-                })
-            )
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .on_press(Message::SelectMiddleTab(ActiveTab::Trades))
         };
 
-        let tabs_row = row![trades_tab_btn, logs_tab_btn].spacing(10);
+        let logs_tab_btn = if self.active_tab == ActiveTab::Logs {
+            logs_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                },
+                text_color: theme_text_teal,
+                border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
+        } else {
+            logs_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                },
+                text_color: match status {
+                    iced::widget::button::Status::Hovered => theme_text_teal,
+                    _ => theme_gray,
+                },
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => Color::from_rgb8(40, 40, 45),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .on_press(Message::SelectMiddleTab(ActiveTab::Logs))
+        };
+
+        let chart_tab_btn = if self.active_tab == ActiveTab::Chart {
+            chart_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                },
+                text_color: theme_text_teal,
+                border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
+        } else {
+            chart_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                },
+                text_color: match status {
+                    iced::widget::button::Status::Hovered => theme_text_teal,
+                    _ => theme_gray,
+                },
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => Color::from_rgb8(40, 40, 45),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .on_press(Message::SelectMiddleTab(ActiveTab::Chart))
+        };
+
+        let analytics_tab_btn = if self.active_tab == ActiveTab::Analytics {
+            analytics_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(40, 40, 45))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(30, 30, 35))),
+                },
+                text_color: theme_text_teal,
+                border: iced::Border { color: theme_text_teal, width: 1.0, radius: 4.0.into() },
+                ..Default::default()
+            })
+        } else {
+            analytics_tab_btn.style(move |_, status| button::Style {
+                background: match status {
+                    iced::widget::button::Status::Hovered => Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                    _ => Some(iced::Background::Color(Color::from_rgb8(15, 15, 20))),
+                },
+                text_color: match status {
+                    iced::widget::button::Status::Hovered => theme_text_teal,
+                    _ => theme_gray,
+                },
+                border: iced::Border {
+                    color: match status {
+                        iced::widget::button::Status::Hovered => theme_text_teal,
+                        _ => Color::from_rgb8(40, 40, 45),
+                    },
+                    width: 1.0,
+                    radius: 4.0.into(),
+                },
+                ..Default::default()
+            })
+            .on_press(Message::SelectMiddleTab(ActiveTab::Analytics))
+        };
+
+        let tabs_row = row![chart_tab_btn, trades_tab_btn, logs_tab_btn, analytics_tab_btn].spacing(10);
 
         let mut logs_col = column![].spacing(4);
         for line in &self.engine_logs {
@@ -890,16 +1073,110 @@ impl MercuryApp {
             );
         }
 
-        let middle_lower_title = if !self.show_logs_tab {
-            text("REAL-TIME MATCHING PRINTS").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() })
-        } else {
-            text("ENGINE SYSTEM LOGS (STDOUT)").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() })
+        let middle_lower_title = match self.active_tab {
+            ActiveTab::Trades => text("REAL-TIME MATCHING PRINTS").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() }),
+            ActiveTab::Logs => text("ENGINE SYSTEM LOGS (STDOUT)").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() }),
+            ActiveTab::Chart => text("REAL-TIME PRICE & VOLUME CHART").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() }),
+            ActiveTab::Analytics => text("HISTORICAL PORTFOLIO ANALYTICS").size(15).font(Font { weight: font::Weight::Bold, ..Font::default() }),
         };
 
-        let middle_lower_content = if !self.show_logs_tab {
-            scrollable(trades_col).height(Length::FillPortion(1))
-        } else {
-            scrollable(logs_col).height(Length::FillPortion(1))
+        let middle_lower_content: Element<'_, Message> = match self.active_tab {
+            ActiveTab::Trades => scrollable(trades_col).height(Length::FillPortion(1)).into(),
+            ActiveTab::Logs => scrollable(logs_col).height(Length::FillPortion(1)).into(),
+            ActiveTab::Chart => {
+                let candlestick = Candlestick {
+                    candles: self.candles.clone(),
+                    marks: self.chart_marks.clone(),
+                };
+                canvas(candlestick).width(Length::Fill).height(Length::FillPortion(1)).into()
+            }
+            ActiveTab::Analytics => {
+                let metrics_row1 = row![
+                    container(column![
+                        text("TOTAL TRADES").size(10).color(theme_gray),
+                        text(self.analytics.total_trades.to_string()).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(Color::WHITE),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("WIN RATE").size(10).color(theme_gray),
+                        text(format!("{:.1}%", self.analytics.win_rate * 100.0)).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(if self.analytics.win_rate >= 0.5 { theme_text_teal } else { theme_text_pink }),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("MAX DRAWDOWN").size(10).color(theme_gray),
+                        text(format!("{:.2}%", self.analytics.max_drawdown * 100.0)).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_text_pink),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("TOTAL PNL").size(10).color(theme_gray),
+                        text(format!("${:.2}", self.analytics.total_pnl)).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(if self.analytics.total_pnl >= 0.0 { theme_text_teal } else { theme_text_pink }),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                ].spacing(10);
+
+                let metrics_row2 = row![
+                    container(column![
+                        text("SHARPE RATIO").size(10).color(theme_gray),
+                        text(format!("{:.2}", self.analytics.sharpe_ratio)).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_text_teal),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("SORTINO RATIO").size(10).color(theme_gray),
+                        text(format!("{:.2}", self.analytics.sortino_ratio)).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_text_teal),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("PROFIT FACTOR").size(10).color(theme_gray),
+                        text(if self.analytics.profit_factor.is_infinite() { "∞".to_string() } else { format!("{:.2}", self.analytics.profit_factor) }).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_text_teal),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                    container(column![
+                        text("WIN/LOSS RATIO").size(10).color(theme_gray),
+                        text(if self.analytics.win_loss_ratio.is_infinite() { "∞".to_string() } else { format!("{:.2}", self.analytics.win_loss_ratio) }).size(14).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_text_teal),
+                    ].spacing(4)).padding([6, 10]).width(Length::FillPortion(1)).style(move |_| container::Style {
+                        background: Some(iced::Background::Color(Color::from_rgb8(25, 25, 30))),
+                        border: iced::Border { color: Color::from_rgb8(35, 35, 40), width: 1.0, radius: 4.0.into() },
+                        ..Default::default()
+                    }),
+                ].spacing(10);
+
+                let equity_canvas = canvas(EquityCurve {
+                    equity_series: self.analytics.equity_curve.clone(),
+                })
+                .width(Length::Fill)
+                .height(Length::FillPortion(1));
+
+                column![
+                    metrics_row1,
+                    metrics_row2,
+                    text("EQUITY CURVE & RUNNING DRAWDOWN").size(12).font(Font { weight: font::Weight::Bold, ..Font::default() }).color(theme_gray),
+                    equity_canvas.height(Length::FillPortion(1))
+                ]
+                .spacing(10)
+                .height(Length::FillPortion(1))
+                .into()
+            }
         };
 
         let middle_panel = container(
@@ -908,7 +1185,7 @@ impl MercuryApp {
                 telemetry_info,
                 sparkline_canvas.height(Length::FillPortion(1)),
                 row![middle_lower_title, tabs_row].spacing(20).align_y(iced::Alignment::Center),
-                middle_lower_content.height(Length::FillPortion(1)),
+                middle_lower_content,
             ]
             .spacing(15)
         )

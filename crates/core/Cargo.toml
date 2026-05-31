@@ -12,6 +12,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "sync", "rt", "fs"] }
 tracing.workspace = true
+memmap2.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

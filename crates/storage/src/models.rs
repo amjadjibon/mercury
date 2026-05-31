@@ -1,7 +1,7 @@
 use mercury_core::{Fill, Side};
 use sqlx::FromRow;
 
-#[derive(Debug, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct TradeModel {
     pub id: i64,
     pub fill_id: String,

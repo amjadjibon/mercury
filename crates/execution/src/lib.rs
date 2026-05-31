@@ -11,6 +11,8 @@ pub mod router;
 pub mod twap;
 pub mod vwap;
 
+pub mod sor;
+
 pub use adaptive_executor::{AdaptiveExecutor, AdaptiveMode, AdaptiveParamModel, ADAPTIVE_FEATURE_DIM};
 pub use backtest::{BacktestResult, SimulatedExchange};
 pub use order_manager::OrderManager;
@@ -19,5 +21,7 @@ pub use probe::{LiquidityProbeConfig, LiquidityProber, ProbeFill, ProbeOrder};
 pub use queue_model::{FillProbabilityConfig, FillProbabilityModel};
 pub use router::Bbo;
 pub use router::SmartOrderRouter;
+pub use sor::{UnifiedOrderBook, SmartOrderRouter as MultiVenueSmartOrderRouter, RoutingAllocation};
 pub use twap::TwapExecutor;
 pub use vwap::VwapExecutor;
+

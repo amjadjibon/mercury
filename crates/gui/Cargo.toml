@@ -13,4 +13,7 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 tracing = "0.1"
 futures-util = { workspace = true }
+memmap2 = { workspace = true }
+mercury-storage = { path = "../storage" }
+rust_decimal = { workspace = true }
 

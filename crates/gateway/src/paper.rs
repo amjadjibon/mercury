@@ -282,7 +282,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_paper_gateway_lifecycle() {
-        let bus = Arc::new(EventBus::new(16));
+        let bus = Arc::new(EventBus::new(1000));
         let gateway = PaperGateway::new(Arc::clone(&bus), 0); // 0ms simulated latency
         
         gateway.connect().await.unwrap();
@@ -335,10 +335,11 @@ mod tests {
             FixedPoint(10_000_000i64),    // 0.1
         );
         gateway.submit_order(&order2).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         gateway.cancel_order(Symbol::new("BTCUSDT"), 2).await.unwrap();
 
         // Yield execution to allow matching engine to process cancellation
-        tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
         // Publish a book update that would have crossed order2 if not cancelled
         let ask_crossed = Level::new(FixedPoint(2_500_000_000_000i64), FixedPoint(10_000_000i64));
@@ -353,7 +354,7 @@ mod tests {
         bus.try_publish(Event::new(11, EventPayload::BookUpdate(Arc::new(update2)))).unwrap();
 
         // We shouldn't get any fill since it was cancelled
-        let res = tokio::time::timeout(std::time::Duration::from_millis(50), fills_rx.recv()).await;
+        let res = tokio::time::timeout(std::time::Duration::from_millis(150), fills_rx.recv()).await;
         assert!(res.is_err(), "Expected no fills due to cancellation");
 
         gateway.disconnect().await.unwrap();

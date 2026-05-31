@@ -78,6 +78,8 @@ core_affinity = "0.8"
 # Low-level socket options (Linux only)
 libc = "0.2"
 
+memmap2 = "0.9"
+
 toml = "0.8"
 
 # ML inference (pure Rust ONNX runtime, no system library required)
