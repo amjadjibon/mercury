@@ -2,8 +2,9 @@
 
 use mercury_core::{BookUpdate, Event, EventPayload, Exchange, FixedPoint, Side, Symbol};
 use mercury_gateway::ExchangeGateway;
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Best Bid and Offer (BBO) cache.
@@ -52,7 +53,7 @@ impl SmartOrderRouter {
             return;
         }
 
-        let mut cache = self.bbo_cache.write().unwrap();
+        let mut cache = self.bbo_cache.write();
         let entry = cache
             .entry((update.symbol, update.exchange))
             .or_insert(Bbo {
@@ -79,7 +80,7 @@ impl SmartOrderRouter {
         side: Side,
         _qty: FixedPoint,
     ) -> Option<(Exchange, FixedPoint)> {
-        let cache = self.bbo_cache.read().unwrap();
+        let cache = self.bbo_cache.read();
 
         let mut best_exchange = None;
         let mut best_price = FixedPoint::ZERO;
@@ -166,7 +167,7 @@ mod tests {
         // With no gateways registered, find_best_execution returns None.
         // Register dummy gateways so routing works.
         // For unit test: inject directly into bbo_cache and gateways.
-        let mut cache = sor.bbo_cache.write().unwrap();
+        let mut cache = sor.bbo_cache.write();
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Binance),
             Bbo { bid: dec!(50000).into(), ask: dec!(50010).into(), timestamp: 1 },
@@ -219,7 +220,7 @@ mod tests {
     #[test]
     fn test_find_best_sell_routes_to_highest_bid() {
         let sor = SmartOrderRouter::new();
-        let mut cache = sor.bbo_cache.write().unwrap();
+        let mut cache = sor.bbo_cache.write();
         cache.insert(
             (Symbol::new("BTCUSDT"), Exchange::Binance),
             Bbo { bid: dec!(50000).into(), ask: dec!(50010).into(), timestamp: 1 },

@@ -34,6 +34,7 @@ impl ShmemServer {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&file_path)?;
 
         file.set_len(TOTAL_SHMEM_SIZE as u64)?;
