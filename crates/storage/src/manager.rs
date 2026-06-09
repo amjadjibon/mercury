@@ -49,11 +49,10 @@ impl StorageManager {
             EventPayload::LatencyReport(report) => {
                 // Throttle: store at most once every 10 reports (~10 s at default rate).
                 let prev = LATENCY_STORE_INTERVAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if prev % 10 == 0 {
-                    if let Err(e) = self.store_latency(report.p50_ns, report.p99_ns, report.p999_ns).await {
+                if prev.is_multiple_of(10)
+                    && let Err(e) = self.store_latency(report.p50_ns, report.p99_ns, report.p999_ns).await {
                         error!("Failed to store latency: {}", e);
                     }
-                }
             }
             EventPayload::MLPrediction(pred) => {
                 if let Err(e) = self.store_ml_prediction(pred).await {
@@ -118,7 +117,7 @@ impl StorageManager {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(pred.timestamp as i64)
+        .bind(pred.timestamp)
         .bind(pred.symbol.as_str())
         .bind(f[0] as f64)
         .bind(f[1] as f64)
@@ -173,17 +172,15 @@ impl StorageManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mercury_core::{EventPayload, Exchange, Side};
+    use mercury_core::{EventPayload, Exchange, LatencyReport, MLPrediction, OrderType, Side, Signal, StrategyId};
     use rust_decimal_macros::dec;
 
-    #[tokio::test]
-    async fn test_storage_manager() {
-        // Use in-memory DB for testing
-        let manager = StorageManager::new(":memory:")
-            .await
-            .expect("Failed to create storage manager");
+    async fn make_manager() -> StorageManager {
+        StorageManager::new(":memory:").await.expect("in-memory DB")
+    }
 
-        let fill = Fill {
+    fn make_fill() -> Fill {
+        Fill {
             trade_id: 123,
             order_id: 456,
             exchange: Exchange::Binance,
@@ -195,17 +192,122 @@ mod tests {
             fee_asset: "BNB".to_string(),
             is_maker: true,
             timestamp: 1000,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_fill_and_load() {
+        let manager = make_manager().await;
+
+        manager.store_event(&Event::new(1, EventPayload::Fill(make_fill()))).await;
+
+        let trades = manager.load_all_trades().await.expect("load trades");
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].symbol, "BTCUSDT");
+        assert_eq!(trades[0].side, "BUY");
+        assert!((trades[0].price - 50000.0).abs() < 1e-6);
+    }
+
+    #[tokio::test]
+    async fn test_store_multiple_fills_ordered_by_timestamp() {
+        let manager = make_manager().await;
+
+        for i in 0u64..5 {
+            let mut f = make_fill();
+            f.trade_id = i;
+            f.timestamp = (5 - i) as i64; // deliberately reverse order
+            manager.store_event(&Event::new(i, EventPayload::Fill(f))).await;
+        }
+
+        let trades = manager.load_all_trades().await.expect("load trades");
+        assert_eq!(trades.len(), 5);
+        // load_all_trades orders by timestamp ASC
+        for w in trades.windows(2) {
+            assert!(w[0].timestamp <= w[1].timestamp);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_store_signal() {
+        let manager = make_manager().await;
+
+        let signal = Signal {
+            symbol: mercury_core::Symbol::new("ETHUSDT"),
+            side: Side::Sell,
+            order_type: OrderType::Limit,
+            price: Some(mercury_core::FixedPoint::from_decimal(dec!(3000.0))),
+            quantity: mercury_core::FixedPoint::from_decimal(dec!(0.5)),
+            strategy: StrategyId::MarketMaker,
+            time_in_force: mercury_core::TimeInForce::GTC,
+            cancel_replace: false,
         };
+        manager.store_event(&Event::new(10, EventPayload::Signal(signal))).await;
 
-        let event = Event::new(1, EventPayload::Fill(fill));
-        manager.store_event(&event).await;
-
-        // Verify data
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM trades")
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM orders")
             .fetch_one(&manager.pool)
             .await
-            .expect("Failed to fetch count");
-
+            .expect("count orders");
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_store_latency_throttled() {
+        let manager = make_manager().await;
+
+        // store_latency is throttled to every 10th call via LATENCY_STORE_INTERVAL
+        for i in 0u64..20 {
+            let report = LatencyReport { p50_ns: 100, p99_ns: 500, p999_ns: 1000, count: i };
+            manager.store_event(&Event::new(i, EventPayload::LatencyReport(report))).await;
+        }
+
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM latency_snapshots")
+            .fetch_one(&manager.pool)
+            .await
+            .expect("count latency rows");
+        // Expect exactly 2 rows: one for call #0 and one for call #10
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_store_ml_prediction() {
+        let manager = make_manager().await;
+
+        let pred = MLPrediction {
+            symbol: mercury_core::Symbol::new("BTCUSDT"),
+            timestamp: 9999,
+            features: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            sell_prob: 0.3,
+            buy_prob: 0.6,
+            decision: 1,
+        };
+        manager.store_event(&Event::new(99, EventPayload::MLPrediction(pred))).await;
+
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM feature_snapshots")
+            .fetch_one(&manager.pool)
+            .await
+            .expect("count predictions");
+        assert_eq!(count, 1);
+
+        let decision: i64 = sqlx::query_scalar("SELECT decision FROM feature_snapshots")
+            .fetch_one(&manager.pool)
+            .await
+            .expect("read decision");
+        assert_eq!(decision, 1);
+    }
+
+    #[tokio::test]
+    async fn test_migration_creates_all_tables() {
+        let manager = make_manager().await;
+
+        for table in &["trades", "orders", "latency_snapshots", "feature_snapshots"] {
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?"
+            )
+            .bind(table)
+            .fetch_one(&manager.pool)
+            .await
+            .expect("check table");
+            assert_eq!(exists, 1, "missing table: {}", table);
+        }
     }
 }
