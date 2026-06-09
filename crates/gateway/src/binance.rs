@@ -171,11 +171,10 @@ impl BinanceGateway {
                         while let Some(msg) = ws.next().await {
                             match msg {
                                 Ok(Message::Text(text)) => {
-                                    if let Some(fill) = parse_execution_report(&text) {
-                                        if fill_tx.send(fill).await.is_err() {
+                                    if let Some(fill) = parse_execution_report(&text)
+                                        && fill_tx.send(fill).await.is_err() {
                                             return; // receiver dropped — engine shutting down
                                         }
-                                    }
                                 }
                                 Ok(Message::Ping(data)) => {
                                     // tungstenite auto-responds to pings but we log it

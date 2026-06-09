@@ -206,6 +206,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_trading(
     symbols: Vec<String>,
     exchange: String,
@@ -811,9 +812,7 @@ async fn run_backtest(file: PathBuf, strategy_name: String) -> Result<()> {
                 time_in_force: signal.time_in_force,
                 created_at: mercury_core::types::now_nanos(),
             };
-            match exchange.submit_order(order) {
-                _ => {}
-            }
+            exchange.submit_order(order);
         }
 
         if event_count % 1000 == 0 {

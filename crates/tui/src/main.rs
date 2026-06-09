@@ -271,11 +271,10 @@ fn run_app(
                 }
                 mercury_core::EventPayload::Trade(trade) => {
                     for tab in app.tabs.iter_mut() {
-                        if tab.symbol == trade.symbol {
-                            if let Some(p) = trade.price.to_f64() {
+                        if tab.symbol == trade.symbol
+                            && let Some(p) = trade.price.to_f64() {
                                 tab.on_price(p);
                             }
-                        }
                     }
                 }
                 mercury_core::EventPayload::LatencyReport(report) => {
@@ -290,9 +289,9 @@ fn run_app(
 
         terminal.draw(|f| ui(f, app))?;
 
-        if event::poll(Duration::from_millis(16))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
+        if event::poll(Duration::from_millis(16))?
+            && let Event::Key(key) = event::read()?
+                && key.kind == KeyEventKind::Press {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
                         KeyCode::Char('k') => app.kill_switch = !app.kill_switch,
@@ -301,8 +300,6 @@ fn run_app(
                         _ => {}
                     }
                 }
-            }
-        }
     }
 }
 

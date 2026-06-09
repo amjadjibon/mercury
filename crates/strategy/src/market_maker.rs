@@ -169,30 +169,27 @@ impl MarketMaker {
     /// fallback EMA-of-squared-returns. Uses Parkinson once it has ≥2 bars.
     fn update_variance(&mut self, mid: Decimal) {
         // Feed Parkinson estimator (uses f64 internally).
-        if let Some(mid_f64) = mid.to_string().parse::<f64>().ok() {
+        if let Ok(mid_f64) = mid.to_string().parse::<f64>() {
             self.vol_estimator.update(mid_f64);
         }
 
         // Parkinson override when warm.
-        if let Some(park_var) = self.vol_estimator.parkinson_variance() {
-            if park_var.is_finite() && park_var > 0.0 {
-                if let Ok(d) = Decimal::from_str_exact(&format!("{:.10}", park_var)) {
+        if let Some(park_var) = self.vol_estimator.parkinson_variance()
+            && park_var.is_finite() && park_var > 0.0
+                && let Ok(d) = Decimal::from_str_exact(&format!("{:.10}", park_var)) {
                     self.variance_ema = d;
                     self.prev_mid = Some(mid);
                     return;
                 }
-            }
-        }
 
         // Fallback: EMA of squared returns.
-        if let Some(prev) = self.prev_mid {
-            if prev > Decimal::ZERO {
+        if let Some(prev) = self.prev_mid
+            && prev > Decimal::ZERO {
                 let ret = (mid - prev) / prev;
                 let sq = ret * ret;
                 self.variance_ema = self.variance_alpha * sq
                     + (Decimal::ONE - self.variance_alpha) * self.variance_ema;
             }
-        }
         self.prev_mid = Some(mid);
     }
 
@@ -270,16 +267,14 @@ impl MarketMaker {
     /// Resolve pending quote outcomes: record fill/cancel into the fill-prob model.
     fn resolve_pending(&mut self, spread_bps: f64) {
         // If pending was filled, it was already recorded in on_fill; skip double-recording.
-        if let Some(pq) = self.pending_bid.take() {
-            if !pq.filled {
+        if let Some(pq) = self.pending_bid.take()
+            && !pq.filled {
                 self.fill_prob.record_quote(pq.distance_bps, pq.queue_depth, spread_bps, false);
             }
-        }
-        if let Some(pq) = self.pending_ask.take() {
-            if !pq.filled {
+        if let Some(pq) = self.pending_ask.take()
+            && !pq.filled {
                 self.fill_prob.record_quote(pq.distance_bps, pq.queue_depth, spread_bps, false);
             }
-        }
     }
 
     /// Compute optimal half-spread: δ = (γ·σ²)/2 + (1/γ)·ln(1 + γ/κ)
@@ -380,12 +375,12 @@ impl Strategy for MarketMaker {
         // Update variance on every tick (not just quote ticks).
         self.update_variance(mid);
 
-        if self.tick_count % self.quote_interval != 0 {
+        if !self.tick_count.is_multiple_of(self.quote_interval) {
             return vec![];
         }
 
         // Feed HMM regime filter and scale spread accordingly.
-        if let Some(mid_f64) = mid.to_string().parse::<f64>().ok() {
+        if let Ok(mid_f64) = mid.to_string().parse::<f64>() {
             self.hmm.update_price(mid_f64);
         }
         let regime_mult = match self.hmm.regime() {

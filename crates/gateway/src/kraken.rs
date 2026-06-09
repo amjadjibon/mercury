@@ -105,10 +105,10 @@ impl KrakenGateway {
     }
 
     fn to_kraken_pair(symbol: &str) -> String {
-        if symbol.ends_with("USDT") {
-            format!("{}/USDT", &symbol[..symbol.len() - 4])
-        } else if symbol.ends_with("USD") {
-            format!("{}/USD", &symbol[..symbol.len() - 3])
+        if let Some(base) = symbol.strip_suffix("USDT") {
+            format!("{}/USDT", base)
+        } else if let Some(base) = symbol.strip_suffix("USD") {
+            format!("{}/USD", base)
         } else {
             symbol.to_string()
         }
@@ -126,11 +126,10 @@ impl ExchangeGateway for KrakenGateway {
         let resp = self.private_post("/0/private/Balance", vec![]).await?;
         let val: serde_json::Value = serde_json::from_str(&resp)
             .map_err(|e| GatewayError::ConnectionFailed(e.to_string()))?;
-        if let Some(errors) = val.get("error").and_then(|e| e.as_array()) {
-            if !errors.is_empty() {
+        if let Some(errors) = val.get("error").and_then(|e| e.as_array())
+            && !errors.is_empty() {
                 return Err(GatewayError::AuthFailed(resp));
             }
-        }
         info!(exchange = "Kraken", "Connected to gateway");
         Ok(())
     }

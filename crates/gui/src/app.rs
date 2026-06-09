@@ -105,10 +105,7 @@ fn engine_log_stream() -> impl futures_util::stream::Stream<Item = Message> {
     }
     
     futures_util::stream::unfold(rx, |mut rx| async move {
-        match rx.recv().await {
-            Some(msg) => Some((msg, rx)),
-            None => None,
-        }
+        rx.recv().await.map(|msg| (msg, rx))
     })
 }
 
@@ -173,11 +170,8 @@ fn spawn_engine_process(
                     }
                 }
                 res = stderr_reader.next_line() => {
-                    match res {
-                        Ok(Some(line)) => {
-                            send_log(format!("[STDERR] {}", line));
-                        }
-                        _ => {}
+                    if let Ok(Some(line)) = res {
+                        send_log(format!("[STDERR] {}", line));
                     }
                 }
                 _ = &mut shutdown_rx => {
@@ -195,19 +189,17 @@ fn spawn_engine_process(
 }
 
 fn send_log(msg: String) {
-    if let Ok(guard) = LOG_TX.lock() {
-        if let Some(tx) = &*guard {
+    if let Ok(guard) = LOG_TX.lock()
+        && let Some(tx) = &*guard {
             let _ = tx.send(Message::EngineLogReceived(msg));
         }
-    }
 }
 
 fn send_stopped() {
-    if let Ok(guard) = LOG_TX.lock() {
-        if let Some(tx) = &*guard {
+    if let Ok(guard) = LOG_TX.lock()
+        && let Some(tx) = &*guard {
             let _ = tx.send(Message::EngineStopped);
         }
-    }
 }
 
 fn connect_stream() -> impl futures_util::stream::Stream<Item = Message> {
@@ -385,15 +377,14 @@ impl MercuryApp {
                         let bar_time = (now_unix / self.timeframe_secs) * self.timeframe_secs;
 
                         let mut updated = false;
-                        if let Some(last_candle) = self.candles.last_mut() {
-                            if last_candle.time == bar_time {
+                        if let Some(last_candle) = self.candles.last_mut()
+                            && last_candle.time == bar_time {
                                 last_candle.high = last_candle.high.max(price_f64);
                                 last_candle.low = last_candle.low.min(price_f64);
                                 last_candle.close = price_f64;
                                 last_candle.volume += qty_f64;
                                 updated = true;
                             }
-                        }
 
                         if !updated {
                             self.candles.push(CandleBar {

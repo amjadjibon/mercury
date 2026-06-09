@@ -100,10 +100,10 @@ impl FeedParser for KrakenParser {
 
 fn to_kraken_pair(symbol: &str) -> String {
     // BTCUSDT → BTC/USDT
-    if symbol.ends_with("USDT") {
-        format!("{}/USDT", &symbol[..symbol.len() - 4])
-    } else if symbol.ends_with("USD") {
-        format!("{}/USD", &symbol[..symbol.len() - 3])
+    if let Some(base) = symbol.strip_suffix("USDT") {
+        format!("{}/USDT", base)
+    } else if let Some(base) = symbol.strip_suffix("USD") {
+        format!("{}/USD", base)
     } else {
         symbol.to_string()
     }

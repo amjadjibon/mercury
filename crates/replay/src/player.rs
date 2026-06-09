@@ -52,12 +52,12 @@ impl Player {
 
         let file = File::open(&self.path)?;
         let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
-        let mut reader = builder.build()?;
+        let reader = builder.build()?;
 
         let mut count: u64 = 0;
         let mut last_timestamp: i64 = 0;
 
-        while let Some(batch_result) = reader.next() {
+        for batch_result in reader {
             let batch = batch_result?;
 
             let id_col = batch

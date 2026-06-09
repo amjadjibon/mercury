@@ -183,12 +183,11 @@ impl PortfolioPlayer {
             let mut min_ts = i64::MAX;
 
             for (idx, stream) in streams.iter().enumerate() {
-                if let Some(event) = &stream.next_event {
-                    if event.timestamp < min_ts {
+                if let Some(event) = &stream.next_event
+                    && event.timestamp < min_ts {
                         min_ts = event.timestamp;
                         min_idx = Some(idx);
                     }
-                }
             }
 
             // Exits when all streams are exhausted

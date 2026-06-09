@@ -114,11 +114,10 @@ impl OrderManager {
 
     /// Submit a signal as an order (routes via SOR if multiple venues are available).
     pub async fn submit(&self, signal: Signal) -> Result<OrderId, ExecutionError> {
-        if signal.cancel_replace {
-            if let Err(e) = self.cancel_all(signal.symbol).await {
+        if signal.cancel_replace
+            && let Err(e) = self.cancel_all(signal.symbol).await {
                 tracing::warn!("cancel_replace cancel_all failed: {}", e);
             }
-        }
 
         let allocations = {
             let books = self.unified_books.read();

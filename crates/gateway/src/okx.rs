@@ -19,11 +19,9 @@ pub struct OkxConfig {
 
 impl OkxConfig {
     pub fn base_url(&self) -> &str {
-        if self.demo {
-            "https://www.okx.com" // demo flag goes via header, URL same
-        } else {
-            "https://www.okx.com"
-        }
+        // Demo mode is indicated via a request header, not a different URL.
+        let _ = self.demo;
+        "https://www.okx.com"
     }
 }
 
@@ -110,7 +108,7 @@ fn epoch_to_parts(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
     let y1 = (rem / 365).min(3);
     let year = (y400 * 400 + y100 * 100 + y4 * 4 + y1 + 1970) as u32;
     let yday = rem - y1 * 365;
-    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
     let months = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut day = yday;
     let mut month = 0u32;
@@ -125,10 +123,10 @@ fn epoch_to_parts(secs: u64) -> (u32, u32, u32, u32, u32, u32) {
 }
 
 fn to_okx_inst(symbol: &str) -> String {
-    if symbol.ends_with("USDT") {
-        format!("{}-USDT", &symbol[..symbol.len() - 4])
-    } else if symbol.ends_with("USD") {
-        format!("{}-USD", &symbol[..symbol.len() - 3])
+    if let Some(base) = symbol.strip_suffix("USDT") {
+        format!("{}-USDT", base)
+    } else if let Some(base) = symbol.strip_suffix("USD") {
+        format!("{}-USD", base)
     } else {
         symbol.to_string()
     }

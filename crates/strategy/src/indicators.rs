@@ -37,11 +37,10 @@ impl Window for Sma {
         self.values.push_back(value);
         self.sum += value;
 
-        if self.values.len() > self.window_size {
-            if let Some(removed) = self.values.pop_front() {
+        if self.values.len() > self.window_size
+            && let Some(removed) = self.values.pop_front() {
                 self.sum -= removed;
             }
-        }
 
         self.value()
     }

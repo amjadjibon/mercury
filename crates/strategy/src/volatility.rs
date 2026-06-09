@@ -93,28 +93,25 @@ impl VolatilityEstimator {
         if high > 0.0 && low > 0.0 && high >= low {
             let ln_ratio = (high / low).ln();
             let park = ln_ratio * ln_ratio / PARKINSON_DENOM;
-            if self.parkinson_samples.len() >= self.window_bars {
-                if let Some(old) = self.parkinson_samples.pop_front() {
+            if self.parkinson_samples.len() >= self.window_bars
+                && let Some(old) = self.parkinson_samples.pop_front() {
                     self.parkinson_sum -= old;
                 }
-            }
             self.parkinson_samples.push_back(park);
             self.parkinson_sum += park;
         }
 
         // Close-to-close variance
-        if let Some(prev) = self.prev_close {
-            if prev > 0.0 && close > 0.0 {
+        if let Some(prev) = self.prev_close
+            && prev > 0.0 && close > 0.0 {
                 let r = (close / prev).ln();
-                if self.close_samples.len() >= self.window_bars {
-                    if let Some(old) = self.close_samples.pop_front() {
+                if self.close_samples.len() >= self.window_bars
+                    && let Some(old) = self.close_samples.pop_front() {
                         self.close_sum -= old;
                     }
-                }
                 self.close_samples.push_back(r * r);
                 self.close_sum += r * r;
             }
-        }
         self.prev_close = Some(close);
 
         // Reset bar

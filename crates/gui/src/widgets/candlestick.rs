@@ -72,7 +72,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
                 color: Color::from_rgb8(100, 100, 105),
                 size: 14.0.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
-                align_y: iced::alignment::Vertical::Center.into(),
+                align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
             return vec![frame.into_geometry()];
@@ -106,7 +106,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
         // Scaling function
         let scale_y = |price: f64| -> f32 {
             let ratio = (price - min_price_padded) / price_range_padded;
-            (chart_height - (ratio as f32 * chart_height)) as f32
+            chart_height - (ratio as f32 * chart_height)
         };
 
         // Draw horizontal grid lines and price tags
@@ -136,7 +136,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
                 color: tick_color,
                 size: text_size.into(),
                 align_x: iced::alignment::Horizontal::Left.into(),
-                align_y: iced::alignment::Vertical::Center.into(),
+                align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
         }
@@ -192,7 +192,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
             // Draw Volume Bar
             if max_vol > 0.0 {
                 let vol_ratio = candle.volume / max_vol;
-                let vol_height = (vol_ratio as f32 * (chart_height * 0.15)) as f32; // max 15% height
+                let vol_height = vol_ratio as f32 * (chart_height * 0.15); // max 15% height
                 let y_vol = chart_height - vol_height;
 
                 let mut vol_color = candle_color;
@@ -222,7 +222,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
                     color: Color::from_rgb8(100, 100, 105),
                     size: text_size.into(),
                     align_x: iced::alignment::Horizontal::Center.into(),
-                    align_y: iced::alignment::Vertical::Center.into(),
+                    align_y: iced::alignment::Vertical::Center,
                     ..Default::default()
                 });
             }
@@ -242,7 +242,7 @@ impl<Message> canvas::Program<Message> for Candlestick {
 
                     // Linear interpolation of X position based on mark timestamp
                     let time_ratio = (mark.time - min_time) as f64 / time_range as f64;
-                    let mx = (time_ratio as f32 * chart_width) as f32;
+                    let mx = time_ratio as f32 * chart_width;
                     let my = scale_y(mark.price);
 
                     let mark_color = if mark.is_buy { theme_text_teal } else { theme_text_pink };

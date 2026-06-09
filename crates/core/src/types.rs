@@ -58,6 +58,7 @@ impl FixedPoint {
     ///
     /// Accepts formats like `"50000"`, `"50000.12"`, `"0.00010000"`, `"-1.5"`.
     /// Returns `None` if the string is not a valid decimal number.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         Self::from_str_decimal(s)
     }
@@ -337,8 +338,10 @@ pub enum OrderStatus {
 
 /// Time in force for orders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum TimeInForce {
     /// Good till cancelled
+    #[default]
     GTC,
     /// Immediate or cancel
     IOC,
@@ -348,11 +351,6 @@ pub enum TimeInForce {
     PostOnly,
 }
 
-impl Default for TimeInForce {
-    fn default() -> Self {
-        Self::GTC
-    }
-}
 
 /// Get current timestamp in nanoseconds.
 pub fn now_nanos() -> Timestamp {

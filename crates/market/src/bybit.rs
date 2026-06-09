@@ -78,8 +78,8 @@ impl FeedParser for BybitParser {
             let symbol_str = data.s.as_deref().unwrap_or("BTCUSDT");
             let symbol = Symbol::new(symbol_str);
 
-            if let Some(trade_list) = data.trades {
-                if let Some(t) = trade_list.into_iter().next() {
+            if let Some(trade_list) = data.trades
+                && let Some(t) = trade_list.into_iter().next() {
                     let trade = Trade {
                         exchange: Exchange::Bybit,
                         symbol,
@@ -91,7 +91,6 @@ impl FeedParser for BybitParser {
                     };
                     return Ok(FeedMessage::Trade(trade));
                 }
-            }
         }
 
         Ok(FeedMessage::Ping)

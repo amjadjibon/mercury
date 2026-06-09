@@ -58,7 +58,7 @@ async fn handle_client(mut stream: UnixStream, mut rx: broadcast::Receiver<Event
     while let Ok(event) = rx.recv().await {
         if let Ok(json) = serde_json::to_string(&event) {
             let line = format!("{}\n", json);
-            if let Err(_) = stream.write_all(line.as_bytes()).await {
+            if stream.write_all(line.as_bytes()).await.is_err() {
                 break; // Client disconnected
             }
         }

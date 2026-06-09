@@ -60,7 +60,7 @@ impl Strategy for RsiStrategy {
             if val < self.oversold && self.position <= Decimal::ZERO {
                 info!(rsi = %val, "RSI Oversold - Buying");
                 return vec![Signal {
-                    symbol: self.symbol.clone(),
+                    symbol: self.symbol,
                     side: Side::Buy,
                     order_type: OrderType::Market,
                     price: None,
@@ -75,7 +75,7 @@ impl Strategy for RsiStrategy {
             if val > self.overbought && self.position >= Decimal::ZERO {
                 info!(rsi = %val, "RSI Overbought - Selling");
                 return vec![Signal {
-                    symbol: self.symbol.clone(),
+                    symbol: self.symbol,
                     side: Side::Sell,
                     order_type: OrderType::Market,
                     price: None,

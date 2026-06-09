@@ -41,6 +41,12 @@ pub struct SmartOrderRouter {
     fees: HashMap<Exchange, f64>,
 }
 
+impl Default for SmartOrderRouter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SmartOrderRouter {
     pub fn new() -> Self {
         let mut fees = HashMap::new();
@@ -150,15 +156,14 @@ impl SmartOrderRouter {
         // Handle remainder if order size exceeds total visible L2 depth
         if !remaining.is_zero() && !allocations.is_empty() {
             allocations[0].quantity = allocations[0].quantity + remaining;
-        } else if !remaining.is_zero() {
-            if let Some(&exchange) = books.keys().next() {
+        } else if !remaining.is_zero()
+            && let Some(&exchange) = books.keys().next() {
                 allocations.push(RoutingAllocation {
                     exchange,
                     price: FixedPoint::ZERO,
                     quantity: remaining,
                 });
             }
-        }
 
         allocations
     }

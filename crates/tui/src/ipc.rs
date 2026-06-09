@@ -27,11 +27,10 @@ impl IpcClient {
 
         tokio::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
-                if let Ok(event) = serde_json::from_str::<Event>(&line) {
-                    if tx.send(event).await.is_err() {
+                if let Ok(event) = serde_json::from_str::<Event>(&line)
+                    && tx.send(event).await.is_err() {
                         break;
                     }
-                }
             }
         });
 

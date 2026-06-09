@@ -235,8 +235,8 @@ impl SimulatedExchange {
                     continue;
                 }
                 let should_fill = match side {
-                    Side::Buy => order.price.map_or(true, |p| p.to_decimal() >= market_price),
-                    Side::Sell => order.price.map_or(true, |p| p.to_decimal() <= market_price),
+                    Side::Buy => order.price.is_none_or(|p| p.to_decimal() >= market_price),
+                    Side::Sell => order.price.is_none_or(|p| p.to_decimal() <= market_price),
                 };
                 if should_fill {
                     *status = OrderStatus::Filled;

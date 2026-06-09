@@ -51,8 +51,8 @@ impl VwapExecutor {
                     qty_remaining
                 } else if bucket_volume.is_zero() {
                     // No volume observed — fall back to equal-weight slice.
-                    let q = equal_slice.min(qty_remaining);
-                    q
+                    
+                    equal_slice.min(qty_remaining)
                 } else {
                     // Proportion: bucket_volume relative to expected average.
                     // Scale equal_slice by observed/expected volume ratio, capped at remaining.
@@ -105,15 +105,14 @@ fn drain_volume(
 ) -> FixedPoint {
     let mut vol = FixedPoint::ZERO;
     while let Ok(event) = sub.try_recv() {
-        if let EventPayload::Trade(t) = event.payload {
-            if t.symbol == symbol {
+        if let EventPayload::Trade(t) = event.payload
+            && t.symbol == symbol {
                 vol = FixedPoint(
                     vol.0.saturating_add(
                         FixedPoint::from_decimal(t.quantity).0,
                     ),
                 );
             }
-        }
     }
     vol
 }

@@ -114,11 +114,11 @@ impl LogisticModel {
         let bc2 = 1.0 - BETA2.powf(t);
         let alpha = self.lr * bc2.sqrt() / bc1;
 
-        for i in 0..3 {
-            let g = err * feat[i];
-            self.m_w[i] = BETA1 * self.m_w[i] + (1.0 - BETA1) * g;
-            self.v_w[i] = BETA2 * self.v_w[i] + (1.0 - BETA2) * g * g;
-            self.weights[i] -= alpha * self.m_w[i] / (self.v_w[i].sqrt() + EPS);
+        for (((w, m), v), &x) in self.weights.iter_mut().zip(self.m_w.iter_mut()).zip(self.v_w.iter_mut()).zip(feat.iter()) {
+            let g = err * x;
+            *m = BETA1 * *m + (1.0 - BETA1) * g;
+            *v = BETA2 * *v + (1.0 - BETA2) * g * g;
+            *w -= alpha * *m / (v.sqrt() + EPS);
         }
         self.m_b = BETA1 * self.m_b + (1.0 - BETA1) * err;
         self.v_b = BETA2 * self.v_b + (1.0 - BETA2) * err * err;

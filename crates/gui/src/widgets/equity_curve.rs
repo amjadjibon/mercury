@@ -59,7 +59,7 @@ impl<Message> canvas::Program<Message> for EquityCurve {
                 color: Color::from_rgba8(255, 255, 255, 0.3),
                 size: 14.0.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
-                align_y: iced::alignment::Vertical::Center.into(),
+                align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
             return vec![frame.into_geometry()];
@@ -108,14 +108,12 @@ impl<Message> canvas::Program<Message> for EquityCurve {
         let dd_path = Path::new(|builder| {
             // Traverse from left to right along the peak curve
             builder.move_to(Point::new(0.0, scale_y(peak_series[0])));
-            for idx in 1..n {
-                let px = (idx as f32) * step_x;
-                builder.line_to(Point::new(px, scale_y(peak_series[idx])));
+            for (idx, &peak) in peak_series.iter().enumerate().skip(1) {
+                builder.line_to(Point::new(idx as f32 * step_x, scale_y(peak)));
             }
             // Traverse from right to left along the actual equity curve
-            for idx in (0..n).rev() {
-                let px = (idx as f32) * step_x;
-                builder.line_to(Point::new(px, scale_y(self.equity_series[idx])));
+            for (idx, &eq) in self.equity_series.iter().enumerate().rev() {
+                builder.line_to(Point::new(idx as f32 * step_x, scale_y(eq)));
             }
             builder.close();
         });
@@ -131,9 +129,8 @@ impl<Message> canvas::Program<Message> for EquityCurve {
         // Draw Peak line (dim dotted/dashed effect or thin line)
         let peak_path = Path::new(|builder| {
             builder.move_to(Point::new(0.0, scale_y(peak_series[0])));
-            for idx in 1..n {
-                let px = (idx as f32) * step_x;
-                builder.line_to(Point::new(px, scale_y(peak_series[idx])));
+            for (idx, &peak) in peak_series.iter().enumerate().skip(1) {
+                builder.line_to(Point::new(idx as f32 * step_x, scale_y(peak)));
             }
         });
         frame.stroke(
@@ -146,9 +143,8 @@ impl<Message> canvas::Program<Message> for EquityCurve {
         // Draw Main Equity Curve (Neon Teal)
         let curve_path = Path::new(|builder| {
             builder.move_to(Point::new(0.0, scale_y(self.equity_series[0])));
-            for idx in 1..n {
-                let px = (idx as f32) * step_x;
-                builder.line_to(Point::new(px, scale_y(self.equity_series[idx])));
+            for (idx, &eq) in self.equity_series.iter().enumerate().skip(1) {
+                builder.line_to(Point::new(idx as f32 * step_x, scale_y(eq)));
             }
         });
         frame.stroke(
@@ -168,7 +164,7 @@ impl<Message> canvas::Program<Message> for EquityCurve {
             color: Color::from_rgb8(0, 240, 200), // Neon Teal
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -180,7 +176,7 @@ impl<Message> canvas::Program<Message> for EquityCurve {
             color: Color::from_rgb8(255, 255, 255),
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Right.into(),
-            align_y: iced::alignment::Vertical::Bottom.into(),
+            align_y: iced::alignment::Vertical::Bottom,
             ..Default::default()
         });
 
@@ -191,7 +187,7 @@ impl<Message> canvas::Program<Message> for EquityCurve {
             color: Color::from_rgb8(255, 60, 120), // Neon Pink
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 

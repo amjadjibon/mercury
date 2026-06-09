@@ -121,35 +121,24 @@ impl MlpQNet {
     }
 
     /// Full forward pass returning all intermediate activations for backprop.
+    #[allow(clippy::type_complexity)]
     fn forward_full(
         &self,
         s: &[f32],
     ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
-        let mut z1 = vec![0.0f32; HIDDEN1];
-        for i in 0..HIDDEN1 {
-            z1[i] = self.b1[i];
-            for j in 0..STATE_DIM {
-                z1[i] += self.w1[i][j] * s[j];
-            }
-        }
+        let z1: Vec<f32> = self.w1.iter().zip(self.b1.iter()).map(|(row, &b)| {
+            b + row.iter().zip(s.iter()).map(|(w, x)| w * x).sum::<f32>()
+        }).collect();
         let h1: Vec<f32> = z1.iter().map(|&x| x.max(0.0)).collect();
 
-        let mut z2 = vec![0.0f32; HIDDEN2];
-        for i in 0..HIDDEN2 {
-            z2[i] = self.b2[i];
-            for j in 0..HIDDEN1 {
-                z2[i] += self.w2[i][j] * h1[j];
-            }
-        }
+        let z2: Vec<f32> = self.w2.iter().zip(self.b2.iter()).map(|(row, &b)| {
+            b + row.iter().zip(h1.iter()).map(|(w, x)| w * x).sum::<f32>()
+        }).collect();
         let h2: Vec<f32> = z2.iter().map(|&x| x.max(0.0)).collect();
 
-        let mut q = vec![0.0f32; N_ACTIONS];
-        for i in 0..N_ACTIONS {
-            q[i] = self.b3[i];
-            for j in 0..HIDDEN2 {
-                q[i] += self.w3[i][j] * h2[j];
-            }
-        }
+        let q: Vec<f32> = self.w3.iter().zip(self.b3.iter()).map(|(row, &b)| {
+            b + row.iter().zip(h2.iter()).map(|(w, x)| w * x).sum::<f32>()
+        }).collect();
         (z1, h1, z2, h2, q)
     }
 
@@ -167,9 +156,9 @@ impl MlpQNet {
         let err = q[action] - td_target; // dL/dq[action] (factor of 2 absorbed into lr)
 
         // Layer 3: compute dh2 from original W3 before updating weights.
-        let dh2_raw: Vec<f32> = (0..HIDDEN2).map(|j| err * self.w3[action][j]).collect();
-        for j in 0..HIDDEN2 {
-            self.w3[action][j] -= lr * err * h2[j];
+        let dh2_raw: Vec<f32> = self.w3[action].iter().map(|&w| err * w).collect();
+        for (w, &h) in self.w3[action].iter_mut().zip(h2.iter()) {
+            *w -= lr * err * h;
         }
         self.b3[action] -= lr * err;
 
@@ -182,13 +171,13 @@ impl MlpQNet {
 
         // Layer 2: compute dh1 from original W2 before updating weights.
         let dh1_raw: Vec<f32> = (0..HIDDEN1)
-            .map(|k| (0..HIDDEN2).map(|i| dh2[i] * self.w2[i][k]).sum::<f32>())
+            .map(|k| self.w2.iter().zip(dh2.iter()).map(|(row, &d)| d * row[k]).sum::<f32>())
             .collect();
-        for i in 0..HIDDEN2 {
-            for k in 0..HIDDEN1 {
-                self.w2[i][k] -= lr * dh2[i] * h1[k];
+        for ((w_row, b), &dh) in self.w2.iter_mut().zip(self.b2.iter_mut()).zip(dh2.iter()) {
+            for (w, &h) in w_row.iter_mut().zip(h1.iter()) {
+                *w -= lr * dh * h;
             }
-            self.b2[i] -= lr * dh2[i];
+            *b -= lr * dh;
         }
 
         // ReLU gate at h1.
@@ -199,11 +188,11 @@ impl MlpQNet {
             .collect();
 
         // Layer 1.
-        for i in 0..HIDDEN1 {
-            for k in 0..STATE_DIM {
-                self.w1[i][k] -= lr * dh1[i] * s[k];
+        for ((w_row, b), &dh) in self.w1.iter_mut().zip(self.b1.iter_mut()).zip(dh1.iter()) {
+            for (w, &x) in w_row.iter_mut().zip(s.iter()) {
+                *w -= lr * dh * x;
             }
-            self.b1[i] -= lr * dh1[i];
+            *b -= lr * dh;
         }
     }
 }
@@ -465,7 +454,7 @@ impl RlQuotePlacementStrategy {
         }
 
         self.train_steps += 1;
-        if self.train_steps % TARGET_SYNC == 0 {
+        if self.train_steps.is_multiple_of(TARGET_SYNC) {
             self.target_net = self.q_net.clone();
         }
     }
@@ -496,7 +485,7 @@ impl Strategy for RlQuotePlacementStrategy {
                 next_state: state,
             });
 
-            if self.tick_count % TRAIN_EVERY == 0 {
+            if self.tick_count.is_multiple_of(TRAIN_EVERY) {
                 self.train_step();
             }
         }

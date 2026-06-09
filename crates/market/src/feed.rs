@@ -102,12 +102,11 @@ impl FeedManager {
 
                     let (mut write, mut read) = ws_stream.split();
 
-                    if let Some(sub_msg) = parser.subscribe_message(&symbols) {
-                        if let Err(e) = write.send(Message::Text(sub_msg.into())).await {
+                    if let Some(sub_msg) = parser.subscribe_message(&symbols)
+                        && let Err(e) = write.send(Message::Text(sub_msg.into())).await {
                             warn!("Failed to send subscription: {}", e);
                             continue;
                         }
-                    }
 
                     // Process messages until disconnect or shutdown
                     loop {
@@ -162,11 +161,10 @@ impl FeedManager {
     fn dispatch<P: FeedParser>(parser: &P, data: &[u8], event_bus: &Arc<EventBus>) {
         match parser.parse(data) {
             Ok(feed_msg) => {
-                if let Some(event) = Self::to_event(event_bus, feed_msg) {
-                    if let Err(e) = event_bus.try_publish(event) {
+                if let Some(event) = Self::to_event(event_bus, feed_msg)
+                    && let Err(e) = event_bus.try_publish(event) {
                         warn!("Failed to publish event: {}", e);
                     }
-                }
             }
             Err(e) => {
                 warn!("Parse error: {}", e);

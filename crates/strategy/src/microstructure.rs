@@ -177,11 +177,10 @@ impl Vpin {
             let sell_vol = self.current_vol - self.current_buy_vol;
             let bucket_vpin = (self.current_buy_vol - sell_vol).abs() / self.bucket_size;
 
-            if self.bucket_vpins.len() >= self.window_buckets {
-                if let Some(old) = self.bucket_vpins.pop_front() {
+            if self.bucket_vpins.len() >= self.window_buckets
+                && let Some(old) = self.bucket_vpins.pop_front() {
                     self.vpin_sum -= old;
                 }
-            }
             self.bucket_vpins.push_back(bucket_vpin);
             self.vpin_sum += bucket_vpin;
 

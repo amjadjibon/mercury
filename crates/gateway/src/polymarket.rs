@@ -227,11 +227,10 @@ async fn listen_user_fills(url: &str, api_key: String, fill_tx: mpsc::Sender<Fil
                     .await;
 
                 while let Some(Ok(msg)) = ws.next().await {
-                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                        if let Some(fill) = parse_user_fill(&text) {
+                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+                        && let Some(fill) = parse_user_fill(&text) {
                             let _ = fill_tx.send(fill).await;
                         }
-                    }
                 }
             }
             Err(e) => {

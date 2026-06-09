@@ -484,14 +484,13 @@ impl RiskManager {
 
     fn check_signal_quality(&self, signal: &Signal) -> Result<(), RiskViolation> {
         let quality = self.signal_quality.read();
-        if let Some((remaining, reason)) = quality.blocked_updates.get(&signal.symbol) {
-            if *remaining > 0 {
+        if let Some((remaining, reason)) = quality.blocked_updates.get(&signal.symbol)
+            && *remaining > 0 {
                 return Err(RiskViolation::SignalQuality {
                     symbol: signal.symbol,
                     reason,
                 });
             }
-        }
         Ok(())
     }
 
@@ -659,11 +658,11 @@ impl RiskManager {
 
         let recent = &snaps[snaps.len().saturating_sub(min_consecutive)..];
         let all_adverse = recent.iter().all(|s| {
-            let adverse_move = match s.side {
+            
+            match s.side {
                 Side::Buy => current_mid < s.mid_at_fill - threshold,
                 Side::Sell => current_mid > s.mid_at_fill + threshold,
-            };
-            adverse_move
+            }
         });
 
         if all_adverse {

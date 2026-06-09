@@ -126,14 +126,13 @@ fn drain_volume(
 ) -> FixedPoint {
     let mut vol = FixedPoint::ZERO;
     while let Ok(event) = sub.try_recv() {
-        if let EventPayload::Trade(t) = event.payload {
-            if t.symbol == symbol {
+        if let EventPayload::Trade(t) = event.payload
+            && t.symbol == symbol {
                 vol = FixedPoint(
                     vol.0
                         .saturating_add(FixedPoint::from_decimal(t.quantity).0),
                 );
             }
-        }
     }
     vol
 }

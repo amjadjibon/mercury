@@ -65,76 +65,73 @@ impl PaperGateway {
                 tokio::select! {
                     // 1. Market Data Update (via bridge)
                     Some(event) = event_rx.recv() => {
-                        match event.payload {
-                            EventPayload::BookUpdate(update) => {
-                                let best_bid = update.bids.first().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
-                                let best_ask = update.asks.first().map(|l| l.price).unwrap_or(FixedPoint(i64::MAX));
+                        if let EventPayload::BookUpdate(update) = event.payload {
+                            let best_bid = update.bids.first().map(|l| l.price).unwrap_or(FixedPoint::ZERO);
+                            let best_ask = update.asks.first().map(|l| l.price).unwrap_or(FixedPoint(i64::MAX));
 
-                                current_bids.insert(update.symbol.clone(), best_bid);
-                                current_asks.insert(update.symbol.clone(), best_ask);
+                            current_bids.insert(update.symbol, best_bid);
+                            current_asks.insert(update.symbol, best_ask);
 
-                                // Match orders
-                                let mut filled = Vec::new();
-                                let mut remaining = Vec::new();
+                            // Match orders
+                            let mut filled = Vec::new();
+                            let mut remaining = Vec::new();
 
-                                for id in open_orders.drain(..) {
-                                    if let Some(order) = orders.get(&id) {
-                                        if order.symbol != update.symbol {
-                                            remaining.push(id);
-                                            continue;
-                                        }
+                            for id in open_orders.drain(..) {
+                                if let Some(order) = orders.get(&id) {
+                                    if order.symbol != update.symbol {
+                                        remaining.push(id);
+                                        continue;
+                                    }
 
-                                        let price = if order.side == Side::Buy { best_ask } else { best_bid };
+                                    let price = if order.side == Side::Buy { best_ask } else { best_bid };
 
-                                        // Check logic
-                                        let should_fill = match order.side {
-                                            Side::Buy => {
-                                                if let Some(limit) = order.price {
-                                                    limit >= price
-                                                } else {
-                                                    price != FixedPoint(i64::MAX) // Market
-                                                }
+                                    // Check logic
+                                    let should_fill = match order.side {
+                                        Side::Buy => {
+                                            if let Some(limit) = order.price {
+                                                limit >= price
+                                            } else {
+                                                price != FixedPoint(i64::MAX) // Market
                                             }
-                                            Side::Sell => {
-                                                if let Some(limit) = order.price {
-                                                    limit <= price
-                                                } else {
-                                                    !price.is_zero()
-                                                }
-                                            }
-                                        };
-
-                                        if should_fill {
-                                             fill_counter += 1;
-                                             let trade_id = fill_counter;
-
-                                             let fill = Fill {
-                                                trade_id,
-                                                order_id: id,
-                                                symbol: order.symbol.clone(),
-                                                side: order.side,
-                                                price: price.to_decimal(),
-                                                quantity: order.quantity.to_decimal(),
-                                                fee: Decimal::ZERO,
-                                                fee_asset: "USDT".to_string(),
-                                                timestamp: mercury_core::types::now_nanos(),
-                                                exchange: order.exchange,
-                                                is_maker: false,
-                                             };
-                                             filled.push(fill);
-                                        } else {
-                                            remaining.push(id);
                                         }
+                                        Side::Sell => {
+                                            if let Some(limit) = order.price {
+                                                limit <= price
+                                            } else {
+                                                !price.is_zero()
+                                            }
+                                        }
+                                    };
+
+                                    if should_fill {
+                                         fill_counter += 1;
+                                         let trade_id = fill_counter;
+
+                                         let fill = Fill {
+                                            trade_id,
+                                            order_id: id,
+                                            symbol: order.symbol,
+                                            side: order.side,
+                                            price: price.to_decimal(),
+                                            quantity: order.quantity.to_decimal(),
+                                            fee: Decimal::ZERO,
+                                            fee_asset: "USDT".to_string(),
+                                            timestamp: mercury_core::types::now_nanos(),
+                                            exchange: order.exchange,
+                                            is_maker: false,
+                                         };
+                                         filled.push(fill);
+                                    } else {
+                                        remaining.push(id);
                                     }
                                 }
-                                open_orders = remaining;
-
-                                for fill in filled {
-                                    orders.remove(&fill.order_id);
-                                    let _ = fill_tx.send(fill).await;
-                                }
                             }
-                             _ => {}
+                            open_orders = remaining;
+
+                            for fill in filled {
+                                orders.remove(&fill.order_id);
+                                let _ = fill_tx.send(fill).await;
+                            }
                         }
                     }
 
@@ -169,7 +166,7 @@ impl PaperGateway {
                              let fill = Fill {
                                 trade_id,
                                 order_id: order.id,
-                                symbol: order.symbol.clone(),
+                                symbol: order.symbol,
                                 side: order.side,
                                 price: price.to_decimal(),
                                 quantity: order.quantity.to_decimal(),

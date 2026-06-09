@@ -111,7 +111,7 @@ impl<Message> canvas::Program<Message> for DepthMap {
             color: price_color,
             size: price_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -122,7 +122,7 @@ impl<Message> canvas::Program<Message> for DepthMap {
             color: price_color,
             size: price_size.into(),
             align_x: iced::alignment::Horizontal::Center.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -133,7 +133,7 @@ impl<Message> canvas::Program<Message> for DepthMap {
             color: price_color,
             size: price_size.into(),
             align_x: iced::alignment::Horizontal::Right.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -149,7 +149,7 @@ impl<Message> canvas::Program<Message> for DepthMap {
                     color: Color::from_rgba8(255, 255, 255, 0.25),
                     size: 9.0.into(),
                     align_x: iced::alignment::Horizontal::Left.into(),
-                    align_y: iced::alignment::Vertical::Center.into(),
+                    align_y: iced::alignment::Vertical::Center,
                     ..Default::default()
                 });
             }
@@ -164,7 +164,7 @@ impl<Message> canvas::Program<Message> for DepthMap {
                 color: Color::from_rgb8(255, 60, 120), // neon pink
                 size: 11.0.into(),
                 align_x: iced::alignment::Horizontal::Center.into(),
-                align_y: iced::alignment::Vertical::Center.into(),
+                align_y: iced::alignment::Vertical::Center,
                 ..Default::default()
             });
         }

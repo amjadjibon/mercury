@@ -32,9 +32,9 @@ impl BookBuilder {
             .or_insert_with(|| OrderBook::new(update.exchange, update.symbol));
 
         // Check for sequence gaps (skip for snapshots)
-        if !update.is_snapshot {
-            if let Some(&expected) = self.expected_sequence.get(&key) {
-                if update.sequence != expected {
+        if !update.is_snapshot
+            && let Some(&expected) = self.expected_sequence.get(&key)
+                && update.sequence != expected {
                     warn!(
                         exchange = %update.exchange,
                         symbol = %update.symbol,
@@ -44,8 +44,6 @@ impl BookBuilder {
                     );
                     return false;
                 }
-            }
-        }
 
         // Apply the update
         book.apply_update(update);

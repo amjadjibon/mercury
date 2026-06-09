@@ -77,9 +77,7 @@ impl HmmFilter {
             return self.regime();
         }
 
-        let Some(prev_price) = self.prev_price.replace(price) else {
-            return None;
-        };
+        let prev_price = self.prev_price.replace(price)?;
         let ret = (price / prev_price).ln();
         self.update_return(ret)
     }
@@ -90,9 +88,7 @@ impl HmmFilter {
             return self.regime();
         }
 
-        let Some(prev_ret) = self.prev_return.replace(ret) else {
-            return None;
-        };
+        let prev_ret = self.prev_return.replace(ret)?;
 
         let persistence = if ret == 0.0 || prev_ret == 0.0 {
             0.0

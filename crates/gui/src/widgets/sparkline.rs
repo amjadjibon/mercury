@@ -82,7 +82,7 @@ impl<Message> canvas::Program<Message> for Sparkline {
             color: label_color,
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -93,7 +93,7 @@ impl<Message> canvas::Program<Message> for Sparkline {
             color: Color::from_rgba8(255, 255, 255, 0.2),
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 
@@ -104,7 +104,7 @@ impl<Message> canvas::Program<Message> for Sparkline {
             color: Color::from_rgba8(255, 60, 120, 0.35),
             size: text_size.into(),
             align_x: iced::alignment::Horizontal::Left.into(),
-            align_y: iced::alignment::Vertical::Center.into(),
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
         });
 

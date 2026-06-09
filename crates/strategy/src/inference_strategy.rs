@@ -91,14 +91,13 @@ impl OnlineClassifier {
 
     pub fn predict(&self, features: [f32; FEATURE_COUNT]) -> [f32; 3] {
         let mut logits = self.bias;
-        for class in 0..3 {
-            for (idx, feature) in features.iter().copied().enumerate() {
-                logits[class] += self.weights[class][idx] * feature;
-            }
+        for (logit, w_row) in logits.iter_mut().zip(self.weights.iter()) {
+            *logit += w_row.iter().zip(features.iter()).map(|(w, &f)| w * f).sum::<f32>();
         }
         softmax(logits)
     }
 
+    #[allow(clippy::needless_range_loop)]
     pub fn update(&mut self, features: [f32; FEATURE_COUNT], label: i8) -> [f32; 3] {
         let target = label_index(label);
         let probs = self.predict(features);
@@ -486,9 +485,9 @@ impl Strategy for InferenceStrategy {
 
 fn flatten_lob(lob: [[f32; LOB_LEVELS]; LOB_CHANNELS]) -> [f32; LOB_CHANNELS * LOB_LEVELS] {
     let mut flat = [0.0f32; LOB_CHANNELS * LOB_LEVELS];
-    for channel in 0..LOB_CHANNELS {
+    for (channel, row) in lob.iter().enumerate() {
         let offset = channel * LOB_LEVELS;
-        flat[offset..offset + LOB_LEVELS].copy_from_slice(&lob[channel]);
+        flat[offset..offset + LOB_LEVELS].copy_from_slice(row);
     }
     flat
 }

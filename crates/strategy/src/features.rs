@@ -62,10 +62,9 @@ impl RunningNormalizer {
         if self.count < self.min_count {
             return;
         }
-        for i in 0..FEATURE_COUNT {
-            let var = self.m2[i] / self.count as f64;
-            let std = var.sqrt().max(1e-8);
-            features[i] = ((features[i] as f64 - self.mean[i]) / std) as f32;
+        for ((feat, &mean), &m2) in features.iter_mut().zip(self.mean.iter()).zip(self.m2.iter()) {
+            let std = (m2 / self.count as f64).sqrt().max(1e-8);
+            *feat = ((*feat as f64 - mean) / std) as f32;
         }
     }
 
@@ -312,12 +311,11 @@ impl FeatureComputer {
         self.vwap_window.push_back((pv, trade.quantity));
         self.vwap_sum_pv += pv;
         self.vwap_sum_v += trade.quantity;
-        if self.vwap_window.len() > VWAP_WINDOW {
-            if let Some((old_pv, old_v)) = self.vwap_window.pop_front() {
+        if self.vwap_window.len() > VWAP_WINDOW
+            && let Some((old_pv, old_v)) = self.vwap_window.pop_front() {
                 self.vwap_sum_pv -= old_pv;
                 self.vwap_sum_v -= old_v;
             }
-        }
 
         // Order-flow window
         let (bq, sq) = match trade.side {
@@ -327,12 +325,11 @@ impl FeatureComputer {
         self.flow_window.push_back((bq, sq));
         self.flow_buy_sum += bq;
         self.flow_sell_sum += sq;
-        if self.flow_window.len() > FLOW_WINDOW {
-            if let Some((ob, os)) = self.flow_window.pop_front() {
+        if self.flow_window.len() > FLOW_WINDOW
+            && let Some((ob, os)) = self.flow_window.pop_front() {
                 self.flow_buy_sum -= ob;
                 self.flow_sell_sum -= os;
             }
-        }
     }
 
     /// Compute the 12-element feature vector from an `OrderBook` snapshot.

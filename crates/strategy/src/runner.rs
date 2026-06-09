@@ -119,8 +119,8 @@ impl StrategyRunner {
         std::thread::Builder::new()
             .name("mercury-strategy".into())
             .spawn(move || {
-                if let Some(idx) = core_id {
-                    if let Some(cores) = core_affinity::get_core_ids() {
+                if let Some(idx) = core_id
+                    && let Some(cores) = core_affinity::get_core_ids() {
                         if let Some(&core) = cores.get(idx) {
                             if core_affinity::set_for_current(core) {
                                 info!(core = idx, "Strategy thread pinned to CPU core");
@@ -135,7 +135,6 @@ impl StrategyRunner {
                             );
                         }
                     }
-                }
 
                 let mut receiver = self.event_bus.subscribe();
                 info!("Strategy thread started (spin-wait mode)");
@@ -150,7 +149,7 @@ impl StrategyRunner {
                         .record((mercury_core::types::now_nanos() - t0) as u64);
 
                     let count = self.latency.count();
-                    if count % 1000 == 0 && count > 0 {
+                    if count.is_multiple_of(1000) && count > 0 {
                         let report = mercury_core::Event::new(
                             self.event_bus.next_id(),
                             mercury_core::EventPayload::LatencyReport(
@@ -190,7 +189,7 @@ impl StrategyRunner {
                         .record((mercury_core::types::now_nanos() - t0) as u64);
 
                     let count = self.latency.count();
-                    if count % 1000 == 0 && count > 0 {
+                    if count.is_multiple_of(1000) && count > 0 {
                         let report = mercury_core::Event::new(
                             self.event_bus.next_id(),
                             mercury_core::EventPayload::LatencyReport(

@@ -280,11 +280,10 @@ async fn listen_kalshi_fills(
                     .await;
 
                 while let Some(Ok(msg)) = ws.next().await {
-                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg {
-                        if let Some(fill) = parse_kalshi_fill(&text) {
+                    if let tokio_tungstenite::tungstenite::Message::Text(text) = msg
+                        && let Some(fill) = parse_kalshi_fill(&text) {
                             let _ = fill_tx.send(fill).await;
                         }
-                    }
                 }
             }
             Err(e) => {
