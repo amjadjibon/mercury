@@ -133,20 +133,16 @@ impl RollSpread {
 
 /// Volume-synchronized Probability of Informed trading (Easley et al., 2012).
 ///
-/// Divides cumulative volume into fixed-size buckets and classifies each trade
-/// as buy or sell. Per bucket: `vpin_bucket = |buy_vol − sell_vol| / bucket_size`.
+/// Backed by [`flowtox::Vpin`]: volume is poured into buckets of exactly
+/// `bucket_size`, and a trade that overflows a bucket is split across the
+/// boundary. Per bucket: `vpin_bucket = |buy_vol − sell_vol| / bucket_size`.
 /// The rolling average over recent buckets gives the overall VPIN ∈ [0, 1].
 ///
 /// High VPIN (>0.5) indicates a toxic order flow environment where market-makers
 /// are likely to suffer adverse selection losses.
 #[derive(Debug, Clone)]
 pub struct Vpin {
-    bucket_size: f64,
-    current_vol: f64,
-    current_buy_vol: f64,
-    bucket_vpins: VecDeque<f64>,
-    window_buckets: usize,
-    vpin_sum: f64,
+    inner: flowtox::Vpin,
 }
 
 impl Vpin {
@@ -156,60 +152,38 @@ impl Vpin {
         assert!(bucket_size > 0.0, "bucket_size must be positive");
         assert!(window_buckets >= 1, "window_buckets must be at least 1");
         Self {
-            bucket_size,
-            current_vol: 0.0,
-            current_buy_vol: 0.0,
-            bucket_vpins: VecDeque::with_capacity(window_buckets + 1),
-            window_buckets,
-            vpin_sum: 0.0,
+            inner: flowtox::Vpin::new(bucket_size, window_buckets)
+                .expect("bucket_size and window_buckets validated above"),
         }
     }
 
     /// Process a trade. Returns the updated rolling VPIN when a bucket completes.
     pub fn on_trade(&mut self, quantity: f64, side: Side) -> Option<f64> {
-        let vol = quantity.abs();
-        self.current_vol += vol;
-        if matches!(side, Side::Buy) {
-            self.current_buy_vol += vol;
-        }
-
-        if self.current_vol >= self.bucket_size {
-            let sell_vol = self.current_vol - self.current_buy_vol;
-            let bucket_vpin = (self.current_buy_vol - sell_vol).abs() / self.bucket_size;
-
-            if self.bucket_vpins.len() >= self.window_buckets
-                && let Some(old) = self.bucket_vpins.pop_front() {
-                    self.vpin_sum -= old;
-                }
-            self.bucket_vpins.push_back(bucket_vpin);
-            self.vpin_sum += bucket_vpin;
-
-            self.current_vol = 0.0;
-            self.current_buy_vol = 0.0;
-
-            return Some(self.vpin());
-        }
-        None
+        let side = match side {
+            Side::Buy => flowtox::Side::Buy,
+            Side::Sell => flowtox::Side::Sell,
+        };
+        let before = self.inner.completed_buckets();
+        self.inner.update_side(side, quantity.abs());
+        (self.inner.completed_buckets() > before).then(|| self.vpin())
     }
 
     /// Rolling VPIN ∈ [0, 1]. `0.0` until the first bucket completes.
     pub fn vpin(&self) -> f64 {
-        if self.bucket_vpins.is_empty() {
+        let n = self.buckets_ready();
+        if n == 0 {
             return 0.0;
         }
-        self.vpin_sum / self.bucket_vpins.len() as f64
+        self.inner.bucket_imbalances().sum::<f64>() / n as f64
     }
 
     /// Number of completed buckets.
     pub fn buckets_ready(&self) -> usize {
-        self.bucket_vpins.len()
+        self.inner.bucket_imbalances().count()
     }
 
     pub fn reset(&mut self) {
-        self.current_vol = 0.0;
-        self.current_buy_vol = 0.0;
-        self.bucket_vpins.clear();
-        self.vpin_sum = 0.0;
+        self.inner.reset();
     }
 }
 
@@ -298,5 +272,17 @@ mod tests {
         vpin.reset();
         assert_eq!(vpin.buckets_ready(), 0);
         assert_eq!(vpin.vpin(), 0.0);
+    }
+
+    #[test]
+    fn vpin_splits_trade_across_bucket_boundary() {
+        let mut vpin = Vpin::new(10.0, 2);
+        vpin.on_trade(9.0, Side::Buy);
+        // Sell 11: 1 unit closes bucket 1 (9 buy vs 1 sell), 10 carry into bucket 2.
+        assert!(vpin.on_trade(11.0, Side::Sell).is_some());
+        assert_eq!(vpin.buckets_ready(), 2);
+        // (0.8 + 1.0) / 2; the old code produced a single bucket of |9 - 11| / 10 = 0.2.
+        assert!((vpin.vpin() - 0.9).abs() < 1e-9);
+        assert!(vpin.vpin() <= 1.0);
     }
 }
