@@ -1985,6 +1985,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bf7cc16383c4b8d58b9905a8509f02926ce3058053c056376248d958c9df1e8"
 
 [[package]]
+name = "flowtox"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d64da4aa09c4d87ba473b1002d66b72675126e799e762cd416c4f243757890c"
+
+[[package]]
 name = "flume"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3848,6 +3854,7 @@ name = "mercury-strategy"
 version = "0.1.0"
 dependencies = [
  "core_affinity",
+ "flowtox",
  "mercury-core",
  "mercury-metrics",
  "rust_decimal",
